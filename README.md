@@ -1,4 +1,7 @@
-# cherrycola
+# CherrySoda
+Custom Ollama based Agent Runtime Environment for GraceOS
+
+The command, app and package are called `cherrycola`. [GraceOS](https://github.com/itsHarshDabas/GraceOS) builds its `cherrycola` package from the commit pinned in its `iso/cherrysoda.ref`. This code lived in GraceOS under `services/cherrycola` until 2026-10-21; its history came along.
 
 Local-model CLI for GraceOS. Runs inference through **Ollama** (default)
 or **LM Studio's local server**. The GraceOS desktop calls it; users can too.
