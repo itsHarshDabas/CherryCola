@@ -1,0 +1,30 @@
+# Maintainer: GraceOS <https://github.com/itsHarshDabas/CherryCola>
+# The AUR package. release.yml fills in pkgver and sha256sums for each tag
+# and pushes this file to aur.archlinux.org when AUR_SSH_PRIVATE_KEY is set.
+# (GraceOS builds its own package from a pinned commit instead.)
+pkgname=cherrycola
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="Run AI models on your own PC: Ollama, llama.cpp or LM Studio, with every load setting"
+arch=(any)
+url=https://github.com/itsHarshDabas/CherryCola
+license=(LicenseRef-unspecified)
+depends=(python)
+optdepends=(
+  'ollama: the default engine (or ollama-cuda, ollama-rocm, ollama-vulkan for a GPU)'
+  'python-gobject: the CherryCola chat app'
+  'libadwaita: the CherryCola chat app'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=(SKIP)
+
+package() {
+  cd "CherryCola-$pkgver"
+  install -d "$pkgdir/usr/lib/cherrycola"
+  cp -r cherrycola "$pkgdir/usr/lib/cherrycola/"
+  find "$pkgdir/usr/lib/cherrycola" -name __pycache__ -prune -exec rm -rf {} +
+  install -Dm755 bin/cherrycola "$pkgdir/usr/bin/cherrycola"
+  install -Dm755 bin/cherrycola-chat "$pkgdir/usr/bin/cherrycola-chat"
+  install -Dm644 data/org.graceos.CherryCola.desktop "$pkgdir/usr/share/applications/org.graceos.CherryCola.desktop"
+  install -Dm644 data/org.graceos.CherryCola.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/org.graceos.CherryCola.svg"
+}

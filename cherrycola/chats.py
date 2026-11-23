@@ -31,9 +31,8 @@ class Chat:
 
 
 def chats_dir() -> Path:
-    base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser(
-        "~/.local/share")
-    return Path(base) / "cherrycola" / "chats"
+    from . import osdeps
+    return osdeps.data_home() / "cherrycola" / "chats"
 
 
 def new_chat(model: str) -> Chat:

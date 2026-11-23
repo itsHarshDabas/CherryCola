@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -70,10 +69,8 @@ class Config:
 
 
 def config_path() -> Path:
-    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(
-        os.path.expanduser("~"), ".config"
-    )
-    return Path(base) / "grace" / "cherrycola.conf"
+    from . import osdeps
+    return osdeps.config_home() / "grace" / "cherrycola.conf"
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -164,15 +161,8 @@ def save_setting(key: str, value: str, path: Path | None = None) -> Path:
 
 
 def total_ram_bytes(meminfo: str = "/proc/meminfo") -> int | None:
-    try:
-        with open(meminfo, encoding="utf-8") as handle:
-            for line in handle:
-                if line.startswith("MemTotal:"):
-                    parts = line.split()
-                    return int(parts[1]) * 1024  # kB -> bytes
-    except (OSError, ValueError, IndexError):
-        return None
-    return None
+    from . import osdeps
+    return osdeps.total_ram(meminfo)
 
 
 def default_model_for_ram(total_bytes: int | None) -> str:

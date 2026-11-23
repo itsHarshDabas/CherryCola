@@ -234,8 +234,8 @@ def test_import_ollama_links_the_blob(cfg, tmp_path, monkeypatch):
     name = llamacpp.import_ollama(cfg, "qwen3:4b")
     assert name == "ollama/qwen3-4b"
     link = Path(cfg.models_dir) / "ollama/qwen3-4b.gguf"
-    assert link.is_symlink()
-    assert link.resolve() == (root / "blobs" / f"sha256-{digest}").resolve()
+    # A symlink; a hard link on Windows without symlink rights.
+    assert link.samefile(root / "blobs" / f"sha256-{digest}")
     with pytest.raises(llamacpp.LlamaError, match="has no model"):
         llamacpp.import_ollama(cfg, "llama3:8b")
     with pytest.raises(llamacpp.LlamaError, match="bad model name"):

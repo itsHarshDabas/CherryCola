@@ -206,9 +206,8 @@ _FALSE = {"0", "false", "no", "off"}
 
 
 def profiles_path() -> Path:
-    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(
-        os.path.expanduser("~"), ".config")
-    return Path(base) / "grace" / "cherrycola-models.json"
+    from . import osdeps
+    return osdeps.config_home() / "grace" / "cherrycola-models.json"
 
 
 def parse_value(key: str, raw):

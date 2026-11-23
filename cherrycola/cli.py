@@ -7,7 +7,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -16,7 +15,7 @@ from typing import Sequence
 
 from . import backends as be
 from . import config as config_mod
-from . import gguf, hardware, llamacpp, profiles
+from . import gguf, hardware, llamacpp, osdeps, profiles
 from . import web as web_mod
 
 __all__ = ["build_parser", "main", "run"]
@@ -32,16 +31,11 @@ def _err(message: str) -> None:
 
 
 def _state_dir() -> Path:
-    base = os.environ.get("XDG_STATE_HOME") or os.path.join(
-        os.path.expanduser("~"), ".local", "state")
-    return Path(base) / "cherrycola"
+    return osdeps.state_home() / "cherrycola"
 
 
 def _runtime_dir() -> Path:
-    base = os.environ.get("XDG_RUNTIME_DIR")
-    if base:
-        return Path(base) / "cherrycola"
-    return _state_dir()
+    return osdeps.runtime_dir()
 
 
 def _pid_file() -> Path:
@@ -60,19 +54,12 @@ def _read_pid() -> int | None:
 
 
 def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        return False
+    return osdeps.pid_alive(pid)
 
 
 def _is_ollama(pid: int) -> bool:
     """A stale pid file may point at a reused pid; only ever signal our ollama."""
-    try:
-        return Path(f"/proc/{pid}/comm").read_text(encoding="utf-8").strip() == "ollama"
-    except OSError:
-        return False
+    return osdeps.process_name(pid) == "ollama"
 
 
 def _spawn(args: list[str], log_path: Path, env: dict | None = None):
@@ -82,8 +69,8 @@ def _spawn(args: list[str], log_path: Path, env: dict | None = None):
     try:
         proc = subprocess.Popen(
             args, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
-            start_new_session=True, close_fds=True,
             env={**os.environ, **env} if env else None,
+            **osdeps.popen_detached(),
         )
     finally:
         log.close()
@@ -135,7 +122,7 @@ def stop_server(cfg: config_mod.Config) -> int:
         _err("cherrycola did not start an ollama server (not running)")
         return EXIT_UNREACHABLE
     try:
-        os.kill(pid, signal.SIGTERM)
+        osdeps.terminate(pid)
     except OSError as exc:
         _err(f"could not stop ollama server (pid {pid}): {exc}")
         return EXIT_USAGE
