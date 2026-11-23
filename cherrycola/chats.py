@@ -112,5 +112,7 @@ def to_markup(text: str) -> str:
         s = re.sub(r"`([^`\n]+)`", r"<tt>\1</tt>", s)
         s = re.sub(r"\*\*([^*\n]+)\*\*", r"<b>\1</b>", s)
         s = re.sub(r"(?m)^#{1,6} +(.+)$", r"<b>\1</b>", s)
+        s = re.sub(r"(?m)^(\s*)[-*] +", r"\1• ", s)
+        s = re.sub(r"(?<![*\w])\*([^*\n]+)\*(?!\*)", r"<i>\1</i>", s)
         out.append(s)
     return "".join(out)

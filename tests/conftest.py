@@ -154,3 +154,12 @@ def lmstudio_cfg(lmstudio_server):
     return config_mod.Config(
         backend="lmstudio", model="lm-model",
         ollama_url="http://127.0.0.1:9", lmstudio_url=lmstudio_server)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_dirs(tmp_path, monkeypatch):
+    """Never read or write the real user's settings, models or state."""
+    for var, sub in (("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"),
+                     ("XDG_STATE_HOME", "state"),
+                     ("XDG_RUNTIME_DIR", "run")):
+        monkeypatch.setenv(var, str(tmp_path / "xdg" / sub))

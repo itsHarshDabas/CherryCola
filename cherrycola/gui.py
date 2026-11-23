@@ -9,16 +9,18 @@ from __future__ import annotations
 
 import sys
 import threading
+import time
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
 from . import backends as be  # noqa: E402
-from . import chats, cli, web  # noqa: E402
+from . import chats, cli, profiles, web  # noqa: E402
 from . import config as config_mod  # noqa: E402
+from .settings_panel import SettingsPanel  # noqa: E402
 
 APP_ID = "org.graceos.CherryCola"
 CSS = """
@@ -27,7 +29,57 @@ CSS = """
 .bubble.assistant { background: @card_bg_color; }
 .sources { font-size: 0.9em; }
 .sources button { padding: 2px 6px; min-height: 0; }
+.stats { font-size: 0.85em; opacity: 0.6; }
+.prompt { border-radius: 18px; padding: 4px 8px; }
+.prompt textview, .prompt textview text { background: transparent; }
 """
+
+
+class PromptBox(Gtk.Overlay):
+    """A growing, multi-line input. Enter sends, Shift+Enter adds a line."""
+
+    def __init__(self, on_send):
+        super().__init__(hexpand=True)
+        self.view = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR,
+                                 accepts_tab=False, top_margin=8,
+                                 bottom_margin=8, left_margin=6,
+                                 right_margin=6)
+        self.buffer = self.view.get_buffer()
+        scroll = Gtk.ScrolledWindow(child=self.view, propagate_natural_height=True,
+                                    max_content_height=200, min_content_height=24,
+                                    hscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.frame = Gtk.Frame(child=scroll, css_classes=["prompt", "view"])
+        self.set_child(self.frame)
+        self.hint = Gtk.Label(label="Ask anything", xalign=0,
+                              margin_start=16, margin_top=12,
+                              valign=Gtk.Align.START,
+                              css_classes=["dim-label"], can_target=False)
+        self.add_overlay(self.hint)
+        self.buffer.connect("changed", lambda *_: self.hint.set_visible(
+            not self.get_text()))
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self._on_key, on_send)
+        self.view.add_controller(keys)
+
+    def _on_key(self, _ctl, keyval, _code, state, on_send):
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and not (
+                state & Gdk.ModifierType.SHIFT_MASK):
+            on_send()
+            return True
+        return False
+
+    def get_text(self) -> str:
+        return self.buffer.get_text(self.buffer.get_start_iter(),
+                                    self.buffer.get_end_iter(), False)
+
+    def set_text(self, text: str) -> None:
+        self.buffer.set_text(text)
+
+    def set_placeholder_text(self, text: str) -> None:
+        self.hint.set_label(text)
+
+    def grab_focus(self) -> bool:
+        return self.view.grab_focus()
 
 
 def _label(text: str = "", **kw) -> Gtk.Label:
@@ -76,7 +128,12 @@ class ChatWindow(Adw.ApplicationWindow):
         del_btn = Gtk.Button(icon_name="user-trash-symbolic",
                              tooltip_text="Delete this chat")
         del_btn.connect("clicked", self._on_delete)
+        self.tune_btn = Gtk.ToggleButton(
+            icon_name="preferences-system-symbolic",
+            tooltip_text="Model settings: loading, GPU, sampling and every "
+                         "llama.cpp option (Ctrl+,)")
         header = Adw.HeaderBar(title_widget=self.model_drop)
+        header.pack_end(self.tune_btn)
         header.pack_end(self.web_btn)
         header.pack_end(del_btn)
         self.banner = Adw.Banner()
@@ -92,11 +149,11 @@ class ChatWindow(Adw.ApplicationWindow):
         adj.connect("value-changed", self._on_scrolled)
         adj.connect("changed", self._follow)
 
-        self.entry = Gtk.Entry(placeholder_text="Ask anything", hexpand=True)
-        self.entry.connect("activate", self._on_send)
+        self.entry = PromptBox(self._on_send)
         self.send_btn = Gtk.Button(icon_name="go-up-symbolic",
                                    tooltip_text="Send",
-                                   css_classes=["suggested-action", "circular"])
+                                   css_classes=["suggested-action", "circular"],
+                                   valign=Gtk.Align.END)
         self.send_btn.connect("clicked", self._on_send)
         row = Gtk.Box(spacing=8, margin_top=6, margin_bottom=12,
                       margin_start=12, margin_end=12)
@@ -110,9 +167,18 @@ class ChatWindow(Adw.ApplicationWindow):
         main.add_top_bar(header)
         main.add_top_bar(self.banner)
 
+        self.panel = SettingsPanel(self)
+        self.tune = Adw.OverlaySplitView(
+            content=main, sidebar=self.panel, show_sidebar=False,
+            sidebar_position=Gtk.PackType.END, min_sidebar_width=340,
+            max_sidebar_width=420)
+        self.tune_btn.bind_property(
+            "active", self.tune, "show-sidebar",
+            GObject.BindingFlags.BIDIRECTIONAL)
+        self.tune_btn.connect("toggled", self._on_tune)
         split = Adw.NavigationSplitView(min_sidebar_width=170, max_sidebar_width=260,
             sidebar=Adw.NavigationPage(title="Chats", child=side),
-            content=Adw.NavigationPage(title="CherryCola", child=main))
+            content=Adw.NavigationPage(title="CherryCola", child=self.tune))
         self.toasts = Adw.ToastOverlay(child=split)
         self.set_content(self.toasts)
 
@@ -120,6 +186,11 @@ class ChatWindow(Adw.ApplicationWindow):
         new.connect("activate", lambda *_: self.new_chat())
         self.add_action(new)
         app.set_accels_for_action("win.new", ["<Control>n"])
+        tune = Gio.SimpleAction(name="tune")
+        tune.connect("activate", lambda *_: self.tune_btn.set_active(
+            not self.tune_btn.get_active()))
+        self.add_action(tune)
+        app.set_accels_for_action("win.tune", ["<Control>comma"])
 
         self.refresh_list()
         self.render()
@@ -149,8 +220,10 @@ class ChatWindow(Adw.ApplicationWindow):
         self.backend, self.models = backend, models
         self.entry.set_placeholder_text("Ask anything")
         if rc != cli.EXIT_OK:
-            name = "LM Studio" if backend == "lmstudio" else "Ollama"
-            self._banner(f"Can't reach {name}", "Retry")
+            name = {"lmstudio": "LM Studio", "llamacpp": "llama.cpp"}.get(
+                backend, "Ollama")
+            what = "find" if backend == "llamacpp" else "reach"
+            self._banner(f"Can't {what} {name}", "Retry")
             return
         if not self.chat.model:
             self.chat.model = default
@@ -160,6 +233,14 @@ class ChatWindow(Adw.ApplicationWindow):
         self.model_drop.set_selected(names.index(self.chat.model))
         self._filling = False
         self._check_model()
+        self._refresh_panel()
+
+    def _on_tune(self, *_):
+        self._refresh_panel()
+
+    def _refresh_panel(self):
+        if self.tune_btn.get_active() and self.chat.model:
+            self.panel.show_for(self.backend, self.chat.model)
 
     def _check_model(self):
         model = self.chat.model
@@ -168,7 +249,10 @@ class ChatWindow(Adw.ApplicationWindow):
             return
         size = config_mod.MODEL_SIZES_GB.get(model)
         about = f" (about {size} GB)" if size else ""
-        if self.backend == "ollama":
+        if self.backend == "llamacpp":
+            self._banner(f"No GGUF file for {model}: download one in Model "
+                         f"settings", None)
+        elif self.backend == "ollama":
             self._banner(f"{model} isn't downloaded yet{about}", "Download")
         else:
             self._banner(f"Load {model} in the LM Studio app", None)
@@ -213,6 +297,7 @@ class ChatWindow(Adw.ApplicationWindow):
         if self.chat.messages:
             chats.save(self.chat)
         self._check_model()
+        self._refresh_panel()
 
     # ---- chats -----------------------------------------------------------
 
@@ -284,6 +369,7 @@ class ChatWindow(Adw.ApplicationWindow):
             if m["role"] == "assistant":
                 lbl.set_markup(chats.to_markup(m["content"]))
                 self._add_sources(m.get("sources") or [])
+                self._add_actions(m["content"], "")
             else:
                 lbl.set_text(m["content"])
 
@@ -313,6 +399,20 @@ class ChatWindow(Adw.ApplicationWindow):
             link.get_child().set_ellipsize(Pango.EllipsizeMode.END)
             box.append(link)
         self.messages.append(box)
+
+    def _add_actions(self, text, stats):
+        """Copy button and speed under an answer."""
+        row = Gtk.Box(spacing=6, margin_start=4)
+        copy = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text="Copy",
+                          css_classes=["flat", "circular"])
+        copy.connect("clicked", lambda *_: (
+            self.get_clipboard().set(text), self.toast("Copied")))
+        row.append(copy)
+        if stats:
+            row.append(Gtk.Label(label=stats, css_classes=["stats"],
+                                 tooltip_text="Answer speed, and how long "
+                                 "the model took to start answering"))
+        self.messages.append(row)
 
     def _on_scrolled(self, adj):
         self._at_bottom = adj.get_value() >= (
@@ -378,13 +478,19 @@ class ChatWindow(Adw.ApplicationWindow):
                     messages[1:]
                 sources = [r.url for r in results]
         text, stripper = "", be.ThinkStripper()
+        settings = profiles.effective(self.chat.model)
+        start, first, chunks = time.monotonic(), None, 0
         try:
-            stream = be.iter_chat_chunks(self.backend, self.cfg,
-                                         self.chat.model, messages)
+            stream = be.iter_chat_chunks(
+                self.backend, self.cfg, self.chat.model, messages, settings,
+                on_status=lambda t: GLib.idle_add(self._status, job, t))
             try:
                 for chunk in stream:
                     if job.is_set():
                         return
+                    if first is None:
+                        first = time.monotonic()
+                    chunks += 1
                     text += stripper.feed(chunk)
                     GLib.idle_add(self._show, job, text, sources)
             finally:
@@ -393,7 +499,13 @@ class ChatWindow(Adw.ApplicationWindow):
         except be.BackendError as exc:
             GLib.idle_add(self._finish, job, "", [], str(exc))
             return
-        GLib.idle_add(self._finish, job, text, sources, None)
+        end = time.monotonic()
+        stats = ""
+        if first is not None and chunks > 1 and end > first:
+            # One streamed chunk is about one token on every engine.
+            stats = (f"{chunks / (end - first):.1f} tok/s · first word after "
+                     f"{first - start:.1f} s")
+        GLib.idle_add(self._finish, job, text, sources, None, stats)
 
     def _status(self, job, text):
         if job is self._job:
@@ -404,7 +516,7 @@ class ChatWindow(Adw.ApplicationWindow):
             self._partial, self._sources = text, sources
             self.answer_label.set_text(text or "…")
 
-    def _finish(self, job, text, sources, error):
+    def _finish(self, job, text, sources, error, stats=""):
         if job is not self._job:
             return  # already stopped
         job.set()
@@ -424,6 +536,7 @@ class ChatWindow(Adw.ApplicationWindow):
             {"role": "assistant", "content": text, "sources": sources})
         self.answer_label.set_markup(chats.to_markup(text))
         self._add_sources(sources)
+        self._add_actions(text, stats)
         if self._at_bottom:
             self._scroll_end()
         chats.save(self.chat)
@@ -445,8 +558,9 @@ class ChatApp(Adw.Application):
 
     def do_startup(self):
         Adw.Application.do_startup(self)
+        # Dark like the GraceOS desktop, unless the system asks for light.
         Adw.StyleManager.get_default().set_color_scheme(
-            Adw.ColorScheme.FORCE_DARK)
+            Adw.ColorScheme.PREFER_DARK)
         css = Gtk.CssProvider()
         css.load_from_string(CSS)
         Gtk.StyleContext.add_provider_for_display(
