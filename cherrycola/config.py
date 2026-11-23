@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 __all__ = [
@@ -43,7 +43,7 @@ MODEL_SIZES_GB = {
 _VALID_KEYS = ("backend", "model", "ollama_url", "lmstudio_url",
                "search", "searxng_url", "duckduckgo_url", "web_pages",
                "llamacpp_url", "models_dir", "hf_url", "llama_server",
-               "llama_quantize", "llama_imatrix")
+               "llama_quantize", "llama_imatrix", "model_dirs")
 _PLAIN_KEYS = ("models_dir", "llama_server", "llama_quantize",
                "llama_imatrix")
 
@@ -64,6 +64,8 @@ class Config:
     llama_server: str = "llama-server"
     llama_quantize: str = "llama-quantize"
     llama_imatrix: str = "llama-imatrix"
+    # More folders of GGUF files, separated by | in the file.
+    model_dirs: list[str] = field(default_factory=list)
     path: Path | None = None
 
 
@@ -112,6 +114,8 @@ def load_config(path: Path | None = None) -> Config:
             cfg.duckduckgo_url = value.rstrip("/")
         elif key in ("llamacpp_url", "hf_url"):
             setattr(cfg, key, value.rstrip("/"))
+        elif key == "model_dirs":
+            cfg.model_dirs = [d.strip() for d in value.split("|") if d.strip()]
         elif key in _PLAIN_KEYS:
             setattr(cfg, key, value)
         elif key == "web_pages":

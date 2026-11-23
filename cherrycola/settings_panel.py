@@ -10,6 +10,8 @@ GPU / RAM / disk plan.
 
 from __future__ import annotations
 
+import math
+import os
 import subprocess
 import threading
 
@@ -34,6 +36,43 @@ ENGINE_HELP = {
                 "settings apply here; loading is set in LM Studio.",
 }
 DEFAULT = "Default"
+
+# Sliders for numbers, so a value can't be out of range.
+#   ("steps", [values]): snaps to these (powers of two and the like)
+#   ("range", lo, hi, step, digits)
+# "layers" and "cpus" are filled in from the model and this PC.
+_POW2 = [2 ** i for i in range(5, 14)]
+SLIDERS = {
+    "context_length": ("steps", [2 ** i for i in range(9, 21)]),
+    "threads": ("range", 1, "cpus", 1, 0),
+    "batch_size": ("steps", _POW2),
+    "ubatch_size": ("steps", _POW2[:8]),
+    "gpu_layers": ("range", -1, "layers", 1, 0),
+    "main_gpu": ("range", 0, 8, 1, 0),
+    "cpu_moe_layers": ("range", 0, "layers", 1, 0),
+    "rope_freq_scale": ("range", 0, 1, 0.05, 2),
+    "temperature": ("range", 0, 2, 0.05, 2),
+    "top_k": ("range", 0, 200, 1, 0),
+    "top_p": ("range", 0, 1, 0.01, 2),
+    "min_p": ("range", 0, 1, 0.01, 2),
+    "repeat_penalty": ("range", 0.8, 2, 0.01, 2),
+    "repeat_last_n": ("range", -1, 4096, 1, 0),
+    "presence_penalty": ("range", -2, 2, 0.05, 2),
+    "frequency_penalty": ("range", -2, 2, 0.05, 2),
+    "max_tokens": ("steps", [-1] + [2 ** i for i in range(6, 16)]),
+}
+# Where a slider starts when nothing is set (the usual engine default).
+SLIDER_START = {"context_length": 4096, "batch_size": 2048,
+                "ubatch_size": 512, "gpu_layers": -1, "temperature": 0.8,
+                "top_k": 40, "top_p": 0.95, "min_p": 0.05,
+                "repeat_penalty": 1.0, "repeat_last_n": 64,
+                "max_tokens": -1, "rope_freq_scale": 0}
+
+
+def _short(v: float) -> str:
+    if v >= 1024 and v % 1024 == 0:
+        return f"{int(v) // 1024}K"
+    return f"{v:g}"
 SECTIONS = {"common params": "Loading and hardware",
             "sampling params": "Sampling",
             "speculative params": "Speculative decoding",
@@ -58,6 +97,7 @@ class SettingsPanel(Gtk.Box):
         self.backend = ""
         self.scope_all = False
         self._building = False
+        self._layers, self._trained_ctx = 0, 0
 
         header = Adw.HeaderBar(show_start_title_buttons=False,
                                show_end_title_buttons=False)
@@ -107,6 +147,16 @@ class SettingsPanel(Gtk.Box):
         mine = stored.get(self._target() or profiles.GLOBAL, {})
         eff = profiles.effective(self.model, profiles=stored)
 
+        self._layers, self._trained_ctx = 0, 0
+        path = llamacpp.find_model(config_mod.load_config(), self.model) \
+            if self.model else None
+        if path is not None:
+            try:
+                info = gguf.read_info(path)
+                self._layers = info.block_count
+                self._trained_ctx = info.context_length
+            except gguf.GGUFError:
+                pass
         self.page.add(self._engine_group())
         groups: dict[str, Adw.PreferencesGroup] = {}
         engine = self.backend or "ollama"
@@ -145,6 +195,7 @@ class SettingsPanel(Gtk.Box):
                 f"{label}: {ENGINE_HELP[k]}" for k, label in ENGINES))
         row.connect("notify::selected", self._on_engine, keys)
         group.add(row)
+        group.add(self._folders_row())
         return group
 
     def _row(self, spec: profiles.Setting, own, effective):
@@ -164,6 +215,8 @@ class SettingsPanel(Gtk.Box):
                     else own
                 row.set_selected(choices.index(value) + 1)
             row.connect("notify::selected", self._on_combo, spec, choices)
+        elif spec.key in SLIDERS:
+            row = self._slider_row(spec, own, effective)
         elif spec.key == "system_prompt":
             row = Adw.ExpanderRow(use_markup=False, title=spec.label,
                                   subtitle="Custom" if own else "Default")
@@ -191,6 +244,170 @@ class SettingsPanel(Gtk.Box):
             row.connect("apply", self._on_entry, spec)
         row.set_tooltip_text(tip)
         return row
+
+    def _slider_row(self, spec, own, effective):
+        kind, *conf = SLIDERS[spec.key]
+        layers = self._layers or 200
+        # The name and value on one line, the slider full width under it.
+        row = Adw.PreferencesRow(title=spec.label)
+        value_label = Gtk.Label(css_classes=["dim-label", "numeric"],
+                                xalign=1)
+        scale = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL,
+                          hexpand=True, draw_value=False)
+        start = own if own is not None else effective \
+            if effective is not None else SLIDER_START.get(spec.key)
+        if kind == "steps":
+            steps = list(conf[0])
+            if spec.key == "context_length" and self._trained_ctx:
+                # The model's trained context, and up to 4x with RoPE.
+                steps = [s for s in steps if s <= 4 * self._trained_ctx]
+            scale.set_range(0, len(steps) - 1)
+            scale.set_increments(1, 1)
+            scale.set_round_digits(0)
+            if start is None:
+                start = steps[0]
+            idx = min(range(len(steps)), key=lambda i: abs(
+                math.log2(abs(steps[i]) + 1) - math.log2(abs(start) + 1))
+                if start >= 0 else (0 if steps[i] < 0 else 1))
+
+            def value_of(pos):
+                return steps[int(round(pos))]
+            scale.set_value(idx)
+            if spec.key == "context_length" and self._trained_ctx in steps:
+                scale.add_mark(steps.index(self._trained_ctx),
+                               Gtk.PositionType.BOTTOM, None)
+        else:
+            lo, hi, step, digits = conf
+            hi = {"cpus": os.cpu_count() or 16, "layers": layers}.get(hi, hi)
+            scale.set_range(lo, hi)
+            scale.set_increments(step, step * 10)
+            scale.set_round_digits(digits)
+            if start is None:
+                start = lo
+
+            def value_of(pos):
+                v = round(round(pos / step) * step, digits)
+                return int(v) if spec.kind == "int" else v
+            scale.set_value(min(max(start, lo), hi))
+
+        state = {"set": own is not None}
+
+        def show(value):
+            text = _short(value)
+            if spec.key in ("gpu_layers", "max_tokens") and value == -1:
+                text = "All" if spec.key == "gpu_layers" else "No limit"
+            if not state["set"]:
+                # Not set here: a preset's or all-models value, or default.
+                text = text if effective is not None else DEFAULT
+            value_label.set_label(text)
+        reset = Gtk.Button(icon_name="edit-undo-symbolic",
+                           valign=Gtk.Align.CENTER,
+                           css_classes=["flat", "circular"],
+                           tooltip_text="Back to the default",
+                           visible=own is not None)
+        show(value_of(scale.get_value()))
+        pending = {"id": 0}
+
+        def changed(_scale):
+            if self._building:
+                return
+            value = value_of(scale.get_value())
+            state["set"] = True
+            show(value)
+            reset.set_visible(True)
+            # Save once the slider stops moving.
+            if pending["id"]:
+                GLib.source_remove(pending["id"])
+
+            def save():
+                pending["id"] = 0
+                self._save(spec.key, value, quiet=True)
+                return False
+            pending["id"] = GLib.timeout_add(400, save)
+        scale.connect("value-changed", changed)
+
+        def on_reset(_btn):
+            self._save(spec.key, None, quiet=True)
+            GLib.idle_add(self.rebuild)
+        reset.connect("clicked", on_reset)
+        top = Gtk.Box(spacing=6)
+        top.append(Gtk.Label(label=spec.label, xalign=0, hexpand=True))
+        top.append(value_label)
+        top.append(reset)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2,
+                      margin_top=10, margin_bottom=6, margin_start=12,
+                      margin_end=8)
+        box.append(top)
+        box.append(scale)
+        row.set_child(box)
+        return row
+
+    def _folders_row(self):
+        cfg = config_mod.load_config()
+        row = Adw.ExpanderRow(use_markup=False, title="Model folders",
+                              subtitle=f"{len(cfg.model_dirs) + 1} folders")
+        row.set_tooltip_text(
+            "Folders CherryCola looks in for GGUF models, for example LM "
+            "Studio's models folder. Models found here run with the "
+            "llama.cpp engine and appear in the model menu.")
+        home = os.path.expanduser("~")
+
+        def short(path) -> str:
+            text = str(path)
+            return "~" + text[len(home):] if text.startswith(home) else text
+        own = Adw.ActionRow(use_markup=False, title="CherryCola models",
+                            subtitle=short(llamacpp.models_dir(cfg)),
+                            subtitle_lines=1)
+        own.set_tooltip_text(f"{llamacpp.models_dir(cfg)}\nDownloads and "
+                             f"requantized models go here.")
+        row.add_row(own)
+        for folder in cfg.model_dirs:
+            item = Adw.ActionRow(use_markup=False,
+                                 title=os.path.basename(folder) or folder,
+                                 subtitle=short(folder), subtitle_lines=1)
+            item.set_tooltip_text(folder)
+            rm = Gtk.Button(icon_name="list-remove-symbolic",
+                            valign=Gtk.Align.CENTER, css_classes=["flat"],
+                            tooltip_text="Stop looking in this folder "
+                                         "(nothing is deleted)")
+            rm.connect("clicked", self._on_remove_folder, folder)
+            item.add_suffix(rm)
+            row.add_row(item)
+        add = Gtk.Button(label="Add folder…", halign=Gtk.Align.START,
+                         css_classes=["flat"], margin_top=6, margin_bottom=6,
+                         margin_start=6)
+        add.connect("clicked", self._on_add_folder)
+        row.add_row(add)
+        return row
+
+    def _on_add_folder(self, *_):
+        dialog = Gtk.FileDialog(title="Add a folder of GGUF models")
+
+        def done(dlg, result):
+            try:
+                folder = dlg.select_folder_finish(result)
+            except GLib.Error:
+                return  # cancelled
+            cfg = config_mod.load_config()
+            try:
+                path, count = llamacpp.add_folder(cfg, folder.get_path())
+            except llamacpp.LlamaError as exc:
+                self.win.toast(str(exc))
+                return
+            hint = "" if self.backend == "llamacpp" else \
+                " Switch the engine to llama.cpp to use them."
+            self.win.toast(f"Found {count} models in {path.name}.{hint}")
+            self.win.cfg = config_mod.load_config()
+            self.win.probe()
+            self.rebuild()
+        dialog.select_folder(self.win, None, done)
+
+    def _on_remove_folder(self, _btn, folder):
+        cfg = config_mod.load_config()
+        llamacpp.remove_folder(cfg, folder)
+        self.win.cfg = config_mod.load_config()
+        self.win.probe()
+        self.rebuild()
 
     def _tools_group(self):
         group = Adw.PreferencesGroup(title="Model tools")
@@ -315,7 +532,7 @@ class SettingsPanel(Gtk.Box):
 
     # ---- saving ------------------------------------------------------------------
 
-    def _save(self, key, value):
+    def _save(self, key, value, quiet=False):
         try:
             if value is None:
                 profiles.unset_value(self._target(), key)
@@ -325,8 +542,8 @@ class SettingsPanel(Gtk.Box):
             self.win.toast(str(exc))
             return False
         spec = profiles.SETTINGS.get(key)
-        if spec and spec.group in ("load", "gpu", "rope") or \
-                key == "llama_args":
+        if not quiet and (spec and spec.group in ("load", "gpu", "rope")
+                          or key == "llama_args"):
             self.win.toast("Saved. Applies the next time the model loads.")
         return True
 

@@ -333,3 +333,21 @@ def test_reasoning_content_becomes_think_tags():
     assert text == "<think>hmm</think>Hi"
     stripper = be.ThinkStripper()
     assert stripper.feed(text) + stripper.flush() == "Hi"
+
+
+def test_added_folders(cfg, tmp_path):
+    cfg.path = tmp_path / "cherrycola.conf"
+    write(Path(cfg.models_dir) / "own.gguf")
+    lm = tmp_path / "lmstudio"
+    write(lm / "Qwen/q-Q4_K_M.gguf")
+    with pytest.raises(llamacpp.LlamaError, match="not a folder"):
+        llamacpp.add_folder(cfg, str(tmp_path / "nope"))
+    path, count = llamacpp.add_folder(cfg, str(lm))
+    assert count == 1
+    assert list(llamacpp.list_local(cfg)) == ["own", "lmstudio/Qwen/q-Q4_K_M"]
+    assert config_mod.load_config(cfg.path).model_dirs == [str(path)]
+    with pytest.raises(llamacpp.LlamaError, match="folder you added"):
+        llamacpp.remove(cfg, "lmstudio/Qwen/q-Q4_K_M")
+    assert (lm / "Qwen/q-Q4_K_M.gguf").exists()
+    assert llamacpp.remove_folder(cfg, str(lm))
+    assert list(llamacpp.list_local(cfg)) == ["own"]

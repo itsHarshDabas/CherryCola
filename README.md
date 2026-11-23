@@ -52,6 +52,7 @@ uv run python -m cherrycola status
 | `llamacpp_url` | `http://127.0.0.1:11436` | where CherryCola runs its own `llama-server` |
 | `models_dir` | `~/.local/share/cherrycola/models` | GGUF files for the llama.cpp engine |
 | `llama_server`, `llama_quantize`, `llama_imatrix` | the llama.cpp command names | set a full path for a custom build |
+| `model_dirs` | none | more folders of GGUF models, separated by `|` (`cherrycola folder add` writes it) |
 | `hf_url` | `https://huggingface.co` | override for tests |
 
 `cherrycola use MODEL` and `cherrycola backend NAME` rewrite only that one
@@ -128,6 +129,8 @@ changes. Its log is `~/.local/state/cherrycola/llama-server.log`.
 
 ```sh
 cherrycola get Qwen/Qwen3-4B-GGUF:Q4_K_M   # GGUF from Hugging Face (resumes)
+cherrycola folder add ~/.lmstudio/models   # use GGUFs from any folder
+cherrycola folder list
 cherrycola import-ollama qwen3:4b          # reuse an Ollama download (a link, no copy)
 cherrycola use Qwen3-4B-GGUF/Qwen3-4B-Q4_K_M
 cherrycola info                            # architecture, quantization, size
@@ -187,7 +190,9 @@ and the answer, never the page text.
 on the same engine: pick the model in the header, turn on web search with the
 globe, and old chats stay in the sidebar. A missing model shows a Download
 banner. The sliders button (Ctrl+,) opens Model settings: the engine, every
-setting above with an explanation on hover, and with llama.cpp the model
+setting above with an explanation on hover (numbers are sliders that
+stay within a safe range, and context length stops at 4x what the model
+was trained for), the model folders, and with llama.cpp the model
 tools (plan, requantize, download, import from Ollama) and every
 llama-server option, searchable. Enter sends, Shift+Enter adds a line;
 each answer has a copy button and its speed. Chats are JSON files in `~/.local/share/cherrycola/chats/`; delete one

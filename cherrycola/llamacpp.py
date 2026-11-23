@@ -74,12 +74,14 @@ def models_dir(cfg: config_mod.Config) -> Path:
     return Path(base) / "cherrycola" / "models"
 
 
-def list_local(cfg: config_mod.Config) -> dict[str, Path]:
-    """Model name (path under the models folder, no .gguf) -> first file."""
-    root = models_dir(cfg)
-    out: dict[str, Path] = {}
+def extra_dirs(cfg: config_mod.Config) -> list[Path]:
+    """Folders people added (cherrycola folder add, or the app)."""
+    return [Path(os.path.expanduser(d)) for d in cfg.model_dirs]
+
+
+def _scan(root: Path, prefix: str, out: dict[str, Path]) -> None:
     if not root.is_dir():
-        return out
+        return
     for path in sorted(root.rglob("*.gguf")):
         low = path.name.lower()
         if low.startswith("mmproj") or low.endswith(".imatrix.gguf"):
@@ -87,9 +89,48 @@ def list_local(cfg: config_mod.Config) -> dict[str, Path]:
         split = _SPLIT.search(path.name)
         if split and split.group(1) != "00001":
             continue
-        rel = path.relative_to(root).as_posix()[: -len(".gguf")]
-        out[rel] = path
+        rel = prefix + path.relative_to(root).as_posix()[: -len(".gguf")]
+        out.setdefault(rel, path)
+
+
+def list_local(cfg: config_mod.Config) -> dict[str, Path]:
+    """Model name -> first file.
+
+    Models in CherryCola's own folder are named by their path in it (no
+    .gguf); models in an added folder get that folder's name in front.
+    """
+    out: dict[str, Path] = {}
+    _scan(models_dir(cfg), "", out)
+    for folder in extra_dirs(cfg):
+        _scan(folder, folder.name + "/", out)
     return out
+
+
+def add_folder(cfg: config_mod.Config, folder: str) -> tuple[Path, int]:
+    """Remember a folder of GGUF files. Returns it and its model count."""
+    path = Path(os.path.expanduser(folder)).resolve()
+    if not path.is_dir():
+        raise LlamaError(f"{folder} is not a folder")
+    if "|" in str(path):
+        raise LlamaError("folder names with | are not supported")
+    dirs = [d for d in cfg.model_dirs if Path(d).expanduser().resolve()
+            != path] + [str(path)]
+    config_mod.save_setting("model_dirs", "|".join(dirs), cfg.path)
+    cfg.model_dirs = dirs
+    found: dict[str, Path] = {}
+    _scan(path, "", found)
+    return path, len(found)
+
+
+def remove_folder(cfg: config_mod.Config, folder: str) -> bool:
+    path = Path(os.path.expanduser(folder)).resolve()
+    dirs = [d for d in cfg.model_dirs
+            if Path(d).expanduser().resolve() != path]
+    if len(dirs) == len(cfg.model_dirs):
+        return False
+    config_mod.save_setting("model_dirs", "|".join(dirs), cfg.path)
+    cfg.model_dirs = dirs
+    return True
 
 
 def find_model(cfg: config_mod.Config, name: str) -> Path | None:
@@ -121,9 +162,12 @@ def remove(cfg: config_mod.Config, name: str) -> None:
     local = list_local(cfg)
     if name not in local:
         raise LlamaError(f"no model named {name} in {models_dir(cfg)}")
+    path = local[name]
+    if not path.is_relative_to(models_dir(cfg)):
+        raise LlamaError(f"{name} is in a folder you added; CherryCola only "
+                         f"deletes models in {models_dir(cfg)}")
     if loaded_model() == name:
         stop()
-    path = local[name]
     split = _SPLIT.search(path.name)
     parts = [path]
     if split:

@@ -705,6 +705,31 @@ def cmd_imatrix(args, cfg: config_mod.Config) -> int:
     return EXIT_OK
 
 
+def cmd_folder(args, cfg: config_mod.Config) -> int:
+    if args.action == "list":
+        print(f"{llamacpp.models_dir(cfg)}  (CherryCola's own)")
+        for d in llamacpp.extra_dirs(cfg):
+            print(d)
+        return EXIT_OK
+    if not args.path:
+        _err(f"folder {args.action} needs a path")
+        return EXIT_USAGE
+    try:
+        if args.action == "add":
+            path, count = llamacpp.add_folder(cfg, args.path)
+            print(f"Added {path} ({count} GGUF models). They run with the "
+                  f"llama.cpp engine: cherrycola backend llamacpp")
+            return EXIT_OK
+    except llamacpp.LlamaError as exc:
+        _err(str(exc))
+        return EXIT_USAGE
+    if not llamacpp.remove_folder(cfg, args.path):
+        _err(f"{args.path} is not one of the added folders")
+        return EXIT_USAGE
+    print(f"Removed {args.path} (its files are untouched).")
+    return EXIT_OK
+
+
 def _gguf_info(cfg, model: str) -> gguf.ModelInfo | None:
     path = llamacpp.find_model(cfg, model)
     if path is None:
@@ -848,6 +873,11 @@ def build_parser() -> argparse.ArgumentParser:
     im.add_argument("model")
     im.add_argument("text")
 
+    fold = sub.add_parser("folder", help="add or remove a folder of GGUF "
+                          "models (llama.cpp engine)")
+    fold.add_argument("action", choices=["add", "remove", "list"])
+    fold.add_argument("path", nargs="?", default=None)
+
     inf = sub.add_parser("info", help="what a GGUF model is "
                          "(architecture, size, quantization)")
     inf.add_argument("model", nargs="?", default=None)
@@ -930,7 +960,8 @@ def run(argv: Sequence[str] | None = None,
                   "options": cmd_options, "get": cmd_get,
                   "import-ollama": cmd_import_ollama,
                   "quantize": cmd_quantize, "imatrix": cmd_imatrix,
-                  "info": cmd_info, "plan": cmd_plan}
+                  "info": cmd_info, "plan": cmd_plan,
+                  "folder": cmd_folder}
         if args.command in simple:
             return simple[args.command](args, loaded)
         if args.command == "preset":
