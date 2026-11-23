@@ -22,7 +22,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from . import config as config_mod  # noqa: E402
-from . import gguf, llamacpp, profiles  # noqa: E402
+from . import backends, gguf, llamacpp, profiles  # noqa: E402
 
 ENGINES = [("auto", "Automatic"), ("ollama", "Ollama"),
            ("llamacpp", "llama.cpp"), ("lmstudio", "LM Studio")]
@@ -98,6 +98,8 @@ class SettingsPanel(Gtk.Box):
         self.scope_all = False
         self._building = False
         self._layers, self._trained_ctx = 0, 0
+        self._experts, self._ctx_now = -1, 0
+        self._limit_cache: dict[tuple[str, str], object] = {}
 
         header = Adw.HeaderBar(show_start_title_buttons=False,
                                show_end_title_buttons=False)
@@ -138,6 +140,15 @@ class SettingsPanel(Gtk.Box):
     def _target(self):
         return None if self.scope_all else self.model
 
+    def _limits(self):
+        """The model's own numbers (trained context, layers, experts),
+        asked once per model and engine."""
+        key = (self.backend or "ollama", self.model)
+        if key not in self._limit_cache:
+            self._limit_cache[key] = backends.model_limits(
+                key[0], config_mod.load_config(), self.model, timeout=2)
+        return self._limit_cache[key]
+
     def rebuild(self):
         self._building = True
         self.remove(self.page)
@@ -147,16 +158,11 @@ class SettingsPanel(Gtk.Box):
         mine = stored.get(self._target() or profiles.GLOBAL, {})
         eff = profiles.effective(self.model, profiles=stored)
 
-        self._layers, self._trained_ctx = 0, 0
-        path = llamacpp.find_model(config_mod.load_config(), self.model) \
-            if self.model else None
-        if path is not None:
-            try:
-                info = gguf.read_info(path)
-                self._layers = info.block_count
-                self._trained_ctx = info.context_length
-            except gguf.GGUFError:
-                pass
+        limits = self._limits()
+        self._layers, self._trained_ctx = limits.block_count, \
+            limits.context_length
+        self._experts = limits.expert_count if limits.source else -1
+        self._ctx_now = eff.get("context_length") or 0
         self.page.add(self._engine_group())
         groups: dict[str, Adw.PreferencesGroup] = {}
         engine = self.backend or "ollama"
@@ -167,6 +173,8 @@ class SettingsPanel(Gtk.Box):
             if engine not in spec.engines:
                 hidden += 1
                 continue
+            if key == "cpu_moe_layers" and self._experts == 0:
+                continue  # a dense model has no experts to keep on the CPU
             group = groups.get(spec.group)
             if group is None:
                 group = Adw.PreferencesGroup(title=profiles.GROUPS[spec.group])
@@ -256,11 +264,31 @@ class SettingsPanel(Gtk.Box):
                           hexpand=True, draw_value=False)
         start = own if own is not None else effective \
             if effective is not None else SLIDER_START.get(spec.key)
+        trained = self._trained_ctx
+        caption = ""
         if kind == "steps":
             steps = list(conf[0])
-            if spec.key == "context_length" and self._trained_ctx:
-                # The model's trained context, and up to 4x with RoPE.
-                steps = [s for s in steps if s <= 4 * self._trained_ctx]
+            if spec.key == "context_length" and trained:
+                # Up to the model's own trained window (its exact value is
+                # a stop, so 40960 or 131072 can be picked), then up to 4x
+                # for RoPE/YaRN stretching.
+                steps = sorted({s for s in steps if s <= 4 * trained}
+                               | {trained})
+                caption = (f"Trained on {_short(trained)}. Past the mark "
+                           "needs RoPE scaling (yarn).")
+            elif spec.key == "context_length":
+                caption = "This model's trained window is unknown."
+            if spec.key == "max_tokens":
+                # A reply can't be longer than the window it lives in.
+                window = self._ctx_now or trained
+                if window:
+                    steps = [s for s in steps if s <= window]
+                    if window not in steps:
+                        steps.append(window)
+            if spec.key in ("batch_size", "ubatch_size") and (
+                    self._ctx_now or trained):
+                window = self._ctx_now or trained
+                steps = [s for s in steps if s <= window] or steps[:1]
             scale.set_range(0, len(steps) - 1)
             scale.set_increments(1, 1)
             scale.set_round_digits(0)
@@ -278,7 +306,14 @@ class SettingsPanel(Gtk.Box):
                                Gtk.PositionType.BOTTOM, None)
         else:
             lo, hi, step, digits = conf
-            hi = {"cpus": os.cpu_count() or 16, "layers": layers}.get(hi, hi)
+            # llama.cpp counts the output layer too, so all = layers + 1.
+            hi = {"cpus": os.cpu_count() or 16,
+                  "layers": layers + 1 if self._layers else layers
+                  }.get(hi, hi)
+            if spec.key == "cpu_moe_layers":
+                hi = layers
+            if conf[1] == "layers" and self._layers:
+                caption = f"This model has {self._layers} layers."
             scale.set_range(lo, hi)
             scale.set_increments(step, step * 10)
             scale.set_round_digits(digits)
@@ -296,6 +331,11 @@ class SettingsPanel(Gtk.Box):
             text = _short(value)
             if spec.key in ("gpu_layers", "max_tokens") and value == -1:
                 text = "All" if spec.key == "gpu_layers" else "No limit"
+            if spec.key == "gpu_layers" and self._layers and \
+                    value > self._layers:
+                text = "All"
+            if spec.key == "context_length" and trained and value > trained:
+                text += f"  ·  {value / trained:g}x stretched"
             if not state["set"]:
                 # Not set here: a preset's or all-models value, or default.
                 text = text if effective is not None else DEFAULT
@@ -339,13 +379,18 @@ class SettingsPanel(Gtk.Box):
                       margin_end=8)
         box.append(top)
         box.append(scale)
+        if caption:
+            box.append(Gtk.Label(label=caption, xalign=0, wrap=True,
+                                 css_classes=["dim-label", "caption"]))
         row.set_child(box)
         return row
 
     def _folders_row(self):
         cfg = config_mod.load_config()
+        count = len(cfg.model_dirs) + 1
         row = Adw.ExpanderRow(use_markup=False, title="Model folders",
-                              subtitle=f"{len(cfg.model_dirs) + 1} folders")
+                              subtitle=f"{count} folder"
+                              + ("s" if count != 1 else ""))
         row.set_tooltip_text(
             "Folders CherryCola looks in for GGUF models, for example LM "
             "Studio's models folder. Models found here run with the "

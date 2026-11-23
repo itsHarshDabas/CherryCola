@@ -540,13 +540,21 @@ def cmd_settings(args, cfg: config_mod.Config) -> int:
     else:
         skipped = [k for k in eff if "llamacpp" not in
                    profiles.SETTINGS[k].engines]
+    limits = be.model_limits(backend, cfg, model)
     if args.json:
         print(json.dumps({"backend": backend, "model": model,
                           "settings": eff, "model_settings": own,
                           "defaults": stored.get("*", {}),
-                          "not_applied": skipped}))
+                          "not_applied": skipped,
+                          "limits": {"context_length": limits.context_length,
+                                     "layers": limits.block_count,
+                                     "experts": limits.expert_count}}))
         return EXIT_OK
     print(f"{model} ({backend})")
+    if limits.context_length:
+        print(f"  trained context {limits.context_length:,} tokens"
+              + (f", {limits.block_count} layers" if limits.block_count
+                 else ""))
     if not eff:
         print("  engine defaults (nothing set)")
     for key, value in eff.items():
@@ -574,6 +582,17 @@ def cmd_set(args, cfg: config_mod.Config) -> int:
     target = _target(args, cfg)
     value = profiles.set_value(target, args.key, " ".join(args.value))
     print(f"{args.key} = {_fmt(value)} for {target or 'all models'}.")
+    if target and args.key == "context_length":
+        limits = be.model_limits(be.resolve_backend(cfg), cfg, target)
+        trained = limits.context_length
+        if trained and value > limits.max_context:
+            print(f"Note: {target} was trained on {trained:,} tokens. Over "
+                  f"{limits.max_context:,} (4x) answers usually fall apart, "
+                  "even with RoPE scaling.", file=sys.stderr)
+        elif trained and value > trained:
+            print(f"Note: {target} was trained on {trained:,} tokens. Past "
+                  "that, set rope_scaling (yarn) or answers degrade.",
+                  file=sys.stderr)
     if args.key in profiles.SETTINGS and profiles.SETTINGS[args.key].group \
             in ("load", "gpu", "rope"):
         print("Applies the next time the model loads.")

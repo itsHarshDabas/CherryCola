@@ -45,6 +45,10 @@ def _make_handler(kind: str):
                         {"id": "lm-model"},
                         {"id": "other-model"},
                     ]})
+                if self.path == "/api/v0/models":
+                    return self._send_json({"data": [
+                        {"id": "lm-model", "max_context_length": 131072},
+                    ]})
             self.send_response(404)
             self.end_headers()
 
@@ -71,6 +75,13 @@ def _make_handler(kind: str):
                 self.end_headers()
                 self.wfile.write(data)
                 return
+            if kind == "ollama" and self.path == "/api/show":
+                if payload.get("model") != "qwen3:4b":
+                    return self._send_json({"error": "not found"}, 404)
+                return self._send_json({"model_info": {
+                    "general.architecture": "qwen3",
+                    "qwen3.context_length": 40960,
+                    "qwen3.block_count": 36}})
             if kind == "ollama" and self.path == "/api/pull":
                 chunks = [
                     {"status": "pulling", "completed": 1, "total": 4},

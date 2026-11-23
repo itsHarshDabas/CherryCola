@@ -146,3 +146,27 @@ def test_ollama_start_gets_server_env(tmp_path, monkeypatch):
     cfg = config_mod.Config(backend="ollama", ollama_url="http://127.0.0.1:9")
     cli_mod.start_server(cfg, spawn=fake_spawn, timeout=0.2)
     assert seen["env"]["OLLAMA_KV_CACHE_TYPE"] == "q8_0"
+
+
+def test_model_limits_from_each_engine(ollama_cfg, lmstudio_cfg):
+    limits = be.model_limits("ollama", ollama_cfg, "qwen3:4b")
+    assert (limits.context_length, limits.block_count) == (40960, 36)
+    assert limits.max_context == 4 * 40960
+    assert be.model_limits("ollama", ollama_cfg, "missing").context_length \
+        == 0
+    assert be.model_limits("lmstudio", lmstudio_cfg,
+                           "lm-model").context_length == 131072
+    down = config_mod.Config(backend="ollama", ollama_url="http://127.0.0.1:9")
+    assert be.model_limits("ollama", down, "qwen3:4b").context_length == 0
+
+
+def test_set_context_notes_trained_window(ollama_cfg, capsys):
+    assert run(["set", "context_length", "32768"], cfg=ollama_cfg) == 0
+    assert "Note" not in capsys.readouterr().err
+    assert run(["set", "context_length", "65536"], cfg=ollama_cfg) == 0
+    assert "rope_scaling" in capsys.readouterr().err
+    assert run(["set", "context_length", "262144"], cfg=ollama_cfg) == 0
+    assert "fall apart" in capsys.readouterr().err
+    assert run(["settings", "--json"], cfg=ollama_cfg) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["limits"]["context_length"] == 40960
