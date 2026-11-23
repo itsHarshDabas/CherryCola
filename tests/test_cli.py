@@ -78,7 +78,7 @@ def test_missing_model_exit_3(ollama_cfg, capsys):
     assert run(["ask", "hello"], cfg=ollama_cfg) == 3
     err = capsys.readouterr().err
     assert "isn't downloaded yet" in err
-    assert "cherrycola pull" in err
+    assert "cherrycolallm pull" in err
 
 
 def test_missing_model_known_size(ollama_cfg, capsys):

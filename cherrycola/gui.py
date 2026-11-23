@@ -1,4 +1,4 @@
-"""CherryCola chat: a GTK4 / libadwaita window for local models.
+"""CherryColaLLM chat: a GTK4 / libadwaita window for local models.
 
 Saved chats on the left, the conversation on the right, the model picker in
 the header and a web search toggle (free DuckDuckGo search, read locally).
@@ -91,7 +91,7 @@ def _label(text: str = "", **kw) -> Gtk.Label:
 
 class ChatWindow(Adw.ApplicationWindow):
     def __init__(self, app):
-        super().__init__(application=app, title="CherryCola",
+        super().__init__(application=app, title="CherryColaLLM",
                          default_width=980, default_height=720)
         self.cfg = config_mod.load_config()
         self.backend = ""
@@ -178,7 +178,7 @@ class ChatWindow(Adw.ApplicationWindow):
         self.tune_btn.connect("toggled", self._on_tune)
         split = Adw.NavigationSplitView(min_sidebar_width=170, max_sidebar_width=260,
             sidebar=Adw.NavigationPage(title="Chats", child=side),
-            content=Adw.NavigationPage(title="CherryCola", child=self.tune))
+            content=Adw.NavigationPage(title="CherryColaLLM", child=self.tune))
         self.toasts = Adw.ToastOverlay(child=split)
         self.set_content(self.toasts)
 
@@ -358,7 +358,7 @@ class ChatWindow(Adw.ApplicationWindow):
             self.messages.remove(child)
         if not self.chat.messages:
             self.messages.append(Adw.StatusPage(
-                icon_name="org.graceos.CherryCola", title="Ask CherryCola",
+                icon_name="org.graceos.CherryCola", title="Ask CherryColaLLM",
                 description="Answers come from a model running on this PC. "
                             "Turn on web search (the globe) to look things "
                             "up for free.", vexpand=True,

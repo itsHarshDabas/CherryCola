@@ -1,6 +1,6 @@
 """What differs between Linux, macOS and Windows: folders, processes, memory.
 
-Everything else in CherryCola is plain Python and HTTP. The XDG_* variables
+Everything else in CherryColaLLM is plain Python and HTTP. The XDG_* variables
 win on every system (the tests rely on that).
 """
 

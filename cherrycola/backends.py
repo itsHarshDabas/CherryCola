@@ -33,7 +33,7 @@ __all__ = [
 _TIMEOUT = 10
 
 SYSTEM_PROMPT = (
-    "You are CherryCola, the local assistant built into GraceOS. "
+    "You are CherryColaLLM, the local assistant built into GraceOS. "
     "Answer briefly and plainly."
 )
 
