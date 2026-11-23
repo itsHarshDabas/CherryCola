@@ -1,7 +1,7 @@
 [project]
 name = "cherrycola"
 version = "0.1.0"
-description = "GraceOS local model CLI (Ollama / LM Studio, stdlib only)"
+description = "GraceOS local model runtime (Ollama, llama.cpp, LM Studio; stdlib only)"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []

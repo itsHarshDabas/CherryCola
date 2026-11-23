@@ -9,6 +9,8 @@ from pathlib import Path
 __all__ = [
     "BACKENDS",
     "DEFAULT_DUCKDUCKGO_URL",
+    "DEFAULT_HF_URL",
+    "DEFAULT_LLAMACPP_URL",
     "DEFAULT_LMSTUDIO_URL",
     "DEFAULT_OLLAMA_URL",
     "DEFAULT_SEARXNG_URL",
@@ -22,9 +24,11 @@ __all__ = [
     "total_ram_bytes",
 ]
 
-BACKENDS = ("auto", "ollama", "lmstudio")
+BACKENDS = ("auto", "ollama", "lmstudio", "llamacpp")
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_LMSTUDIO_URL = "http://127.0.0.1:1234"
+DEFAULT_LLAMACPP_URL = "http://127.0.0.1:11436"
+DEFAULT_HF_URL = "https://huggingface.co"
 SEARCH_BACKENDS = ("duckduckgo", "searxng", "off")
 DEFAULT_SEARXNG_URL = "http://127.0.0.1:8888"
 DEFAULT_DUCKDUCKGO_URL = "https://html.duckduckgo.com/html/"
@@ -37,7 +41,11 @@ MODEL_SIZES_GB = {
 }
 
 _VALID_KEYS = ("backend", "model", "ollama_url", "lmstudio_url",
-               "search", "searxng_url", "duckduckgo_url", "web_pages")
+               "search", "searxng_url", "duckduckgo_url", "web_pages",
+               "llamacpp_url", "models_dir", "hf_url", "llama_server",
+               "llama_quantize", "llama_imatrix")
+_PLAIN_KEYS = ("models_dir", "llama_server", "llama_quantize",
+               "llama_imatrix")
 
 
 @dataclass
@@ -50,6 +58,12 @@ class Config:
     searxng_url: str = DEFAULT_SEARXNG_URL
     duckduckgo_url: str = DEFAULT_DUCKDUCKGO_URL
     web_pages: int = 3
+    llamacpp_url: str = DEFAULT_LLAMACPP_URL
+    models_dir: str = ""  # empty: $XDG_DATA_HOME/cherrycola/models
+    hf_url: str = DEFAULT_HF_URL
+    llama_server: str = "llama-server"
+    llama_quantize: str = "llama-quantize"
+    llama_imatrix: str = "llama-imatrix"
     path: Path | None = None
 
 
@@ -96,6 +110,10 @@ def load_config(path: Path | None = None) -> Config:
             cfg.searxng_url = value.rstrip("/")
         elif key == "duckduckgo_url":
             cfg.duckduckgo_url = value.rstrip("/")
+        elif key in ("llamacpp_url", "hf_url"):
+            setattr(cfg, key, value.rstrip("/"))
+        elif key in _PLAIN_KEYS:
+            setattr(cfg, key, value)
         elif key == "web_pages":
             try:
                 cfg.web_pages = max(0, min(5, int(value)))

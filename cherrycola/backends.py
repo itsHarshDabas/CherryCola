@@ -11,6 +11,7 @@ import urllib.request
 from dataclasses import dataclass
 
 from . import config as config_mod
+from . import profiles
 
 __all__ = [
     "BackendError",
@@ -21,6 +22,7 @@ __all__ = [
     "http_get_json",
     "iter_chat_chunks",
     "list_models",
+    "prepare",
     "pull_model",
     "resolve_backend",
     "resolve_model",
@@ -132,6 +134,10 @@ def http_get_json(url: str, timeout: float = _TIMEOUT) -> object:
 
 
 def server_reachable(backend: str, cfg: config_mod.Config) -> bool:
+    if backend == "llamacpp":
+        # llama-server starts per model, on demand: "reachable" means the
+        # engine is installed.
+        return shutil.which(cfg.llama_server) is not None
     base = cfg.ollama_url if backend == "ollama" else cfg.lmstudio_url
     probe = "/api/version" if backend == "ollama" else "/v1/models"
     try:
@@ -161,9 +167,9 @@ def resolve_backend(cfg: config_mod.Config) -> str:
 def resolve_model(backend: str, cfg: config_mod.Config) -> str:
     if cfg.model:
         return cfg.model
-    if backend == "lmstudio":
+    if backend in ("lmstudio", "llamacpp"):
         try:
-            models = list_models("lmstudio", cfg)
+            models = list_models(backend, cfg)
         except BackendError:
             models = []
         if models:
@@ -172,6 +178,9 @@ def resolve_model(backend: str, cfg: config_mod.Config) -> str:
 
 
 def list_models(backend: str, cfg: config_mod.Config) -> list[str]:
+    if backend == "llamacpp":
+        from . import llamacpp
+        return list(llamacpp.list_local(cfg))
     if backend == "ollama":
         try:
             payload = http_get_json(_url(cfg.ollama_url, "/api/tags"))
@@ -194,6 +203,9 @@ def list_models(backend: str, cfg: config_mod.Config) -> list[str]:
 
 
 def running_model(backend: str, cfg: config_mod.Config) -> str | None:
+    if backend == "llamacpp":
+        from . import llamacpp
+        return llamacpp.loaded_model()
     if backend == "ollama":
         try:
             payload = http_get_json(_url(cfg.ollama_url, "/api/ps"))
@@ -221,14 +233,48 @@ def check_model_installed(backend: str, model: str,
         return False
 
 
+def with_system_prompt(messages: list[dict], settings: dict) -> list[dict]:
+    """Swap in the model's own system prompt, when it has one."""
+    prompt = settings.get("system_prompt")
+    if not prompt:
+        return messages
+    if messages and messages[0].get("role") == "system" and \
+            messages[0].get("content") == SYSTEM_PROMPT:
+        return [{"role": "system", "content": prompt}] + messages[1:]
+    if messages and messages[0].get("role") == "system":
+        # Web answers carry sources in the system prompt; keep them.
+        return [{"role": "system", "content": prompt + "\n\n"
+                 + messages[0]["content"]}] + messages[1:]
+    return [{"role": "system", "content": prompt}] + messages
+
+
+def prepare(backend: str, cfg: config_mod.Config, model: str,
+            settings: dict, on_status=None) -> None:
+    """Load the model with its settings where the engine needs that first."""
+    if backend != "llamacpp":
+        return
+    from . import llamacpp
+    try:
+        llamacpp.ensure_loaded(cfg, model, settings, on_status=on_status)
+    except llamacpp.LlamaError as exc:
+        raise BackendError(str(exc)) from exc
+
+
 def _open_chat_stream(backend: str, cfg: config_mod.Config,
-                      model: str, messages: list[dict[str, str]]):
+                      model: str, messages: list[dict[str, str]],
+                      settings: dict):
+    body: dict = {"model": model, "stream": True,
+                  "messages": with_system_prompt(messages, settings)}
     if backend == "ollama":
         url = _url(cfg.ollama_url, "/api/chat")
+        body.update(profiles.ollama_request(settings)[0])
+    elif backend == "llamacpp":
+        url = _url(cfg.llamacpp_url, "/v1/chat/completions")
+        body.update(profiles.llamacpp_request(settings))
     else:
         url = _url(cfg.lmstudio_url, "/v1/chat/completions")
-    data = json.dumps(
-        {"model": model, "messages": messages, "stream": True}).encode()
+        body.update(profiles.lmstudio_request(settings)[0])
+    data = json.dumps(body).encode()
     req = urllib.request.Request(
         url, data=data, headers={"Content-Type": "application/json"},
         method="POST",
@@ -236,6 +282,15 @@ def _open_chat_stream(backend: str, cfg: config_mod.Config,
     try:
         # Loading a model on a slow CPU can take minutes before the first byte.
         return urllib.request.urlopen(req, timeout=600)
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            detail = json.loads(exc.read().decode("utf-8")).get("error", "")
+            if isinstance(detail, dict):
+                detail = detail.get("message", "")
+        except (ValueError, OSError, AttributeError):
+            pass
+        raise BackendError(str(detail or exc)) from exc
     except (urllib.error.URLError, socket.timeout, OSError,
             http.client.HTTPException) as exc:
         raise BackendError(str(exc) or type(exc).__name__) from exc
@@ -273,6 +328,7 @@ def _iter_ollama_text(resp):
 
 def _iter_lmstudio_text(resp):
     buf = ""
+    thinking = False
     for raw in resp:
         buf += bytes(raw).decode("utf-8", errors="replace")
         while "\n" in buf:
@@ -292,16 +348,36 @@ def _iter_lmstudio_text(resp):
                 msg = err.get("message", err) if isinstance(err, dict) else err
                 raise BackendError(str(msg))
             try:
-                delta = obj["choices"][0]["delta"].get("content", "")
-            except (KeyError, TypeError, IndexError):
+                d = obj["choices"][0]["delta"]
+                delta = d.get("content") or ""
+                reasoning = d.get("reasoning_content") or ""
+            except (KeyError, TypeError, IndexError, AttributeError):
                 continue
+            # llama-server sends thinking separately; wrap it in <think>
+            # so ThinkStripper and --show-thinking treat it as usual.
+            if reasoning:
+                if not thinking:
+                    thinking = True
+                    yield "<think>"
+                yield reasoning
             if delta:
+                if thinking:
+                    thinking = False
+                    yield "</think>"
                 yield delta
 
 
-def iter_chat_chunks(backend, cfg, model, messages):
-    """Yield text chunks from a streaming chat request."""
-    with _open_chat_stream(backend, cfg, model, messages) as resp:
+def iter_chat_chunks(backend, cfg, model, messages, settings=None,
+                     on_status=None):
+    """Yield text chunks from a streaming chat request.
+
+    ``settings`` are the model's effective settings (profiles.effective);
+    None reads them from the profiles file.
+    """
+    if settings is None:
+        settings = profiles.effective(model)
+    prepare(backend, cfg, model, settings, on_status)
+    with _open_chat_stream(backend, cfg, model, messages, settings) as resp:
         if backend == "ollama":
             yield from _iter_ollama_text(resp)
         else:
@@ -309,7 +385,14 @@ def iter_chat_chunks(backend, cfg, model, messages):
 
 
 def remove_model(backend, cfg, model) -> None:
-    """Ollama only: DELETE /api/delete."""
+    """Ollama: DELETE /api/delete. llama.cpp: delete the GGUF file(s)."""
+    if backend == "llamacpp":
+        from . import llamacpp
+        try:
+            llamacpp.remove(cfg, model)
+        except llamacpp.LlamaError as exc:
+            raise BackendError(str(exc)) from exc
+        return
     if backend != "ollama":
         raise BackendError("models are removed in the LM Studio app")
     req = urllib.request.Request(

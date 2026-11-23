@@ -373,7 +373,7 @@ def test_chat_web_turn_keeps_history(ollama_cfg, capsys, monkeypatch):
 
     sent = []
 
-    def fake_chunks(backend, cfg, model, messages):
+    def fake_chunks(backend, cfg, model, messages, *_args, **_kw):
         sent.append(messages)
         yield "ok"
 
