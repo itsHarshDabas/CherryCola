@@ -14,7 +14,6 @@ import json
 import os
 import re
 import shutil
-import signal
 import subprocess
 import time
 import urllib.error
@@ -24,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import config as config_mod
-from . import gguf
+from . import gguf, osdeps
 
 __all__ = [
     "LlamaError",
@@ -69,17 +68,17 @@ class LlamaError(Exception):
 def models_dir(cfg: config_mod.Config) -> Path:
     if cfg.models_dir:
         return Path(os.path.expanduser(cfg.models_dir))
-    base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser(
-        "~/.local/share")
-    return Path(base) / "cherrycola" / "models"
+    return osdeps.data_home() / "cherrycola" / "models"
 
 
-def list_local(cfg: config_mod.Config) -> dict[str, Path]:
-    """Model name (path under the models folder, no .gguf) -> first file."""
-    root = models_dir(cfg)
-    out: dict[str, Path] = {}
+def extra_dirs(cfg: config_mod.Config) -> list[Path]:
+    """Folders people added (cherrycola folder add, or the app)."""
+    return [Path(os.path.expanduser(d)) for d in cfg.model_dirs]
+
+
+def _scan(root: Path, prefix: str, out: dict[str, Path]) -> None:
     if not root.is_dir():
-        return out
+        return
     for path in sorted(root.rglob("*.gguf")):
         low = path.name.lower()
         if low.startswith("mmproj") or low.endswith(".imatrix.gguf"):
@@ -87,9 +86,48 @@ def list_local(cfg: config_mod.Config) -> dict[str, Path]:
         split = _SPLIT.search(path.name)
         if split and split.group(1) != "00001":
             continue
-        rel = path.relative_to(root).as_posix()[: -len(".gguf")]
-        out[rel] = path
+        rel = prefix + path.relative_to(root).as_posix()[: -len(".gguf")]
+        out.setdefault(rel, path)
+
+
+def list_local(cfg: config_mod.Config) -> dict[str, Path]:
+    """Model name -> first file.
+
+    Models in CherryCola's own folder are named by their path in it (no
+    .gguf); models in an added folder get that folder's name in front.
+    """
+    out: dict[str, Path] = {}
+    _scan(models_dir(cfg), "", out)
+    for folder in extra_dirs(cfg):
+        _scan(folder, folder.name + "/", out)
     return out
+
+
+def add_folder(cfg: config_mod.Config, folder: str) -> tuple[Path, int]:
+    """Remember a folder of GGUF files. Returns it and its model count."""
+    path = Path(os.path.expanduser(folder)).resolve()
+    if not path.is_dir():
+        raise LlamaError(f"{folder} is not a folder")
+    if "|" in str(path):
+        raise LlamaError("folder names with | are not supported")
+    dirs = [d for d in cfg.model_dirs if Path(d).expanduser().resolve()
+            != path] + [str(path)]
+    config_mod.save_setting("model_dirs", "|".join(dirs), cfg.path)
+    cfg.model_dirs = dirs
+    found: dict[str, Path] = {}
+    _scan(path, "", found)
+    return path, len(found)
+
+
+def remove_folder(cfg: config_mod.Config, folder: str) -> bool:
+    path = Path(os.path.expanduser(folder)).resolve()
+    dirs = [d for d in cfg.model_dirs
+            if Path(d).expanduser().resolve() != path]
+    if len(dirs) == len(cfg.model_dirs):
+        return False
+    config_mod.save_setting("model_dirs", "|".join(dirs), cfg.path)
+    cfg.model_dirs = dirs
+    return True
 
 
 def find_model(cfg: config_mod.Config, name: str) -> Path | None:
@@ -121,9 +159,12 @@ def remove(cfg: config_mod.Config, name: str) -> None:
     local = list_local(cfg)
     if name not in local:
         raise LlamaError(f"no model named {name} in {models_dir(cfg)}")
+    path = local[name]
+    if not path.is_relative_to(models_dir(cfg)):
+        raise LlamaError(f"{name} is in a folder you added; CherryCola only "
+                         f"deletes models in {models_dir(cfg)}")
     if loaded_model() == name:
         stop()
-    path = local[name]
     split = _SPLIT.search(path.name)
     parts = [path]
     if split:
@@ -141,23 +182,12 @@ def remove(cfg: config_mod.Config, name: str) -> None:
 
 # ---- the server ------------------------------------------------------------
 
-def _runtime_dir() -> Path:
-    base = os.environ.get("XDG_RUNTIME_DIR")
-    if base:
-        return Path(base) / "cherrycola"
-    state = os.environ.get("XDG_STATE_HOME") or os.path.expanduser(
-        "~/.local/state")
-    return Path(state) / "cherrycola"
-
-
 def _state_file() -> Path:
-    return _runtime_dir() / "llamacpp.json"
+    return osdeps.runtime_dir() / "llamacpp.json"
 
 
 def log_file() -> Path:
-    state = os.environ.get("XDG_STATE_HOME") or os.path.expanduser(
-        "~/.local/state")
-    return Path(state) / "cherrycola" / "llama-server.log"
+    return osdeps.state_home() / "cherrycola" / "llama-server.log"
 
 
 _CAPS: dict[tuple[str, float], set[str]] = {}
@@ -388,15 +418,11 @@ def _read_state() -> dict:
 
 
 def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except OSError:
+    if not osdeps.pid_alive(pid):
         return False
-    try:  # a reused pid must not be mistaken for our server
-        comm = Path(f"/proc/{pid}/comm").read_text("utf-8").strip()
-    except OSError:
-        return True
-    return comm.startswith("llama-server") or comm.startswith("python")
+    # A reused pid must not be mistaken for our server.
+    name = osdeps.process_name(pid)
+    return name is None or name.startswith(("llama-server", "python"))
 
 
 def loaded_model() -> str | None:
@@ -412,7 +438,7 @@ def _spawn(args: list[str], log_path: Path):
     with open(log_path, "ab") as log:
         return subprocess.Popen(
             args, stdin=subprocess.DEVNULL, stdout=log,
-            stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
+            stderr=subprocess.STDOUT, **osdeps.popen_detached())
 
 
 def _health(url: str) -> str:
@@ -432,7 +458,7 @@ def stop() -> bool:
     stopped = False
     if isinstance(pid, int) and _alive(pid):
         try:
-            os.kill(pid, signal.SIGTERM)
+            osdeps.terminate(pid)
             stopped = True
         except OSError:
             pass
@@ -442,7 +468,7 @@ def stop() -> bool:
             time.sleep(0.25)
         else:
             try:
-                os.kill(pid, signal.SIGKILL)
+                osdeps.terminate(pid, force=True)
             except OSError:
                 pass
     try:
@@ -583,14 +609,7 @@ def make_plan(info: gguf.ModelInfo, settings: dict,
 
 
 def _available_ram() -> int:
-    try:
-        with open("/proc/meminfo", encoding="utf-8") as fh:
-            for line in fh:
-                if line.startswith("MemAvailable:"):
-                    return int(line.split()[1]) * 1024
-    except (OSError, ValueError, IndexError):
-        pass
-    return config_mod.total_ram_bytes() or 0
+    return osdeps.available_ram() or config_mod.total_ram_bytes() or 0
 
 
 # ---- getting models ------------------------------------------------------------
@@ -731,7 +750,7 @@ def import_ollama(cfg: config_mod.Config, model: str) -> str:
         dest.parent.mkdir(parents=True, exist_ok=True)
         if dest.is_symlink() or dest.exists():
             dest.unlink()
-        dest.symlink_to(blob)
+        osdeps.link_file(blob, dest)
         _ = info
         return out_name
     raise LlamaError(f"Ollama has no model {model} downloaded "

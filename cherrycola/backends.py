@@ -233,6 +233,84 @@ def check_model_installed(backend: str, model: str,
         return False
 
 
+@dataclass
+class ModelLimits:
+    """What a model itself supports, read from its own metadata."""
+    context_length: int = 0  # trained context window, 0 = unknown
+    block_count: int = 0     # transformer layers
+    expert_count: int = 0    # MoE experts, 0 = dense
+    source: str = ""         # where the numbers came from
+
+    @property
+    def max_context(self) -> int:
+        """The most context worth offering: trained length, or 4x with
+        RoPE/YaRN scaling (beyond that quality falls apart)."""
+        return self.context_length * 4
+
+
+def _post_json(url: str, payload: dict, timeout: float) -> object:
+    req = urllib.request.Request(
+        url, data=json.dumps(payload).encode(), method="POST",
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, socket.timeout, OSError,
+            http.client.HTTPException, ValueError) as exc:
+        raise BackendError(str(exc) or type(exc).__name__) from exc
+
+
+def _from_gguf_keys(meta: dict) -> ModelLimits:
+    arch = str(meta.get("general.architecture", ""))
+
+    def num(name: str) -> int:
+        value = meta.get(f"{arch}.{name}")
+        return int(value) if isinstance(value, (int, float)) else 0
+    return ModelLimits(num("context_length"), num("block_count"),
+                       num("expert_count"))
+
+
+def model_limits(backend: str, cfg: config_mod.Config, model: str,
+                 timeout: float = 3) -> ModelLimits:
+    """Read the model's trained context, layers and experts from whichever
+    engine has it. Unknown numbers stay 0; this never raises."""
+    if not model:
+        return ModelLimits()
+    from . import gguf, llamacpp
+    path = llamacpp.find_model(cfg, model)
+    if path is not None:
+        try:
+            info = gguf.read_info(path)
+            return ModelLimits(info.context_length, info.block_count,
+                               info.expert_count, "gguf")
+        except gguf.GGUFError:
+            pass
+    if backend == "ollama":
+        try:
+            data = _post_json(_url(cfg.ollama_url, "/api/show"),
+                              {"model": model}, timeout)
+            meta = data.get("model_info") or {}  # type: ignore[union-attr]
+        except (BackendError, AttributeError):
+            return ModelLimits()
+        limits = _from_gguf_keys(meta)
+        limits.source = "ollama"
+        return limits
+    if backend == "lmstudio":
+        # LM Studio's own REST API (0.3+) lists max_context_length.
+        try:
+            data = http_get_json(_url(cfg.lmstudio_url, "/api/v0/models"),
+                                 timeout=timeout)
+            rows = data.get("data") or []  # type: ignore[union-attr]
+        except (BackendError, AttributeError):
+            return ModelLimits()
+        for row in rows:
+            if isinstance(row, dict) and row.get("id") == model:
+                ctx = row.get("max_context_length")
+                return ModelLimits(int(ctx) if isinstance(ctx, int) else 0,
+                                   source="lmstudio")
+    return ModelLimits()
+
+
 def with_system_prompt(messages: list[dict], settings: dict) -> list[dict]:
     """Swap in the model's own system prompt, when it has one."""
     prompt = settings.get("system_prompt")

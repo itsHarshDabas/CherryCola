@@ -7,7 +7,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -16,7 +15,7 @@ from typing import Sequence
 
 from . import backends as be
 from . import config as config_mod
-from . import gguf, hardware, llamacpp, profiles
+from . import gguf, hardware, llamacpp, osdeps, profiles
 from . import web as web_mod
 
 __all__ = ["build_parser", "main", "run"]
@@ -32,16 +31,11 @@ def _err(message: str) -> None:
 
 
 def _state_dir() -> Path:
-    base = os.environ.get("XDG_STATE_HOME") or os.path.join(
-        os.path.expanduser("~"), ".local", "state")
-    return Path(base) / "cherrycola"
+    return osdeps.state_home() / "cherrycola"
 
 
 def _runtime_dir() -> Path:
-    base = os.environ.get("XDG_RUNTIME_DIR")
-    if base:
-        return Path(base) / "cherrycola"
-    return _state_dir()
+    return osdeps.runtime_dir()
 
 
 def _pid_file() -> Path:
@@ -60,19 +54,12 @@ def _read_pid() -> int | None:
 
 
 def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        return False
+    return osdeps.pid_alive(pid)
 
 
 def _is_ollama(pid: int) -> bool:
     """A stale pid file may point at a reused pid; only ever signal our ollama."""
-    try:
-        return Path(f"/proc/{pid}/comm").read_text(encoding="utf-8").strip() == "ollama"
-    except OSError:
-        return False
+    return osdeps.process_name(pid) == "ollama"
 
 
 def _spawn(args: list[str], log_path: Path, env: dict | None = None):
@@ -82,8 +69,8 @@ def _spawn(args: list[str], log_path: Path, env: dict | None = None):
     try:
         proc = subprocess.Popen(
             args, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
-            start_new_session=True, close_fds=True,
             env={**os.environ, **env} if env else None,
+            **osdeps.popen_detached(),
         )
     finally:
         log.close()
@@ -135,7 +122,7 @@ def stop_server(cfg: config_mod.Config) -> int:
         _err("cherrycola did not start an ollama server (not running)")
         return EXIT_UNREACHABLE
     try:
-        os.kill(pid, signal.SIGTERM)
+        osdeps.terminate(pid)
     except OSError as exc:
         _err(f"could not stop ollama server (pid {pid}): {exc}")
         return EXIT_USAGE
@@ -540,13 +527,21 @@ def cmd_settings(args, cfg: config_mod.Config) -> int:
     else:
         skipped = [k for k in eff if "llamacpp" not in
                    profiles.SETTINGS[k].engines]
+    limits = be.model_limits(backend, cfg, model)
     if args.json:
         print(json.dumps({"backend": backend, "model": model,
                           "settings": eff, "model_settings": own,
                           "defaults": stored.get("*", {}),
-                          "not_applied": skipped}))
+                          "not_applied": skipped,
+                          "limits": {"context_length": limits.context_length,
+                                     "layers": limits.block_count,
+                                     "experts": limits.expert_count}}))
         return EXIT_OK
     print(f"{model} ({backend})")
+    if limits.context_length:
+        print(f"  trained context {limits.context_length:,} tokens"
+              + (f", {limits.block_count} layers" if limits.block_count
+                 else ""))
     if not eff:
         print("  engine defaults (nothing set)")
     for key, value in eff.items():
@@ -574,6 +569,17 @@ def cmd_set(args, cfg: config_mod.Config) -> int:
     target = _target(args, cfg)
     value = profiles.set_value(target, args.key, " ".join(args.value))
     print(f"{args.key} = {_fmt(value)} for {target or 'all models'}.")
+    if target and args.key == "context_length":
+        limits = be.model_limits(be.resolve_backend(cfg), cfg, target)
+        trained = limits.context_length
+        if trained and value > limits.max_context:
+            print(f"Note: {target} was trained on {trained:,} tokens. Over "
+                  f"{limits.max_context:,} (4x) answers usually fall apart, "
+                  "even with RoPE scaling.", file=sys.stderr)
+        elif trained and value > trained:
+            print(f"Note: {target} was trained on {trained:,} tokens. Past "
+                  "that, set rope_scaling (yarn) or answers degrade.",
+                  file=sys.stderr)
     if args.key in profiles.SETTINGS and profiles.SETTINGS[args.key].group \
             in ("load", "gpu", "rope"):
         print("Applies the next time the model loads.")
@@ -702,6 +708,31 @@ def cmd_imatrix(args, cfg: config_mod.Config) -> int:
         return EXIT_USAGE
     print(f"Wrote {out}. Use it with: cherrycola quantize {args.model} "
           f"TYPE --imatrix {out}")
+    return EXIT_OK
+
+
+def cmd_folder(args, cfg: config_mod.Config) -> int:
+    if args.action == "list":
+        print(f"{llamacpp.models_dir(cfg)}  (CherryCola's own)")
+        for d in llamacpp.extra_dirs(cfg):
+            print(d)
+        return EXIT_OK
+    if not args.path:
+        _err(f"folder {args.action} needs a path")
+        return EXIT_USAGE
+    try:
+        if args.action == "add":
+            path, count = llamacpp.add_folder(cfg, args.path)
+            print(f"Added {path} ({count} GGUF models). They run with the "
+                  f"llama.cpp engine: cherrycola backend llamacpp")
+            return EXIT_OK
+    except llamacpp.LlamaError as exc:
+        _err(str(exc))
+        return EXIT_USAGE
+    if not llamacpp.remove_folder(cfg, args.path):
+        _err(f"{args.path} is not one of the added folders")
+        return EXIT_USAGE
+    print(f"Removed {args.path} (its files are untouched).")
     return EXIT_OK
 
 
@@ -848,6 +879,11 @@ def build_parser() -> argparse.ArgumentParser:
     im.add_argument("model")
     im.add_argument("text")
 
+    fold = sub.add_parser("folder", help="add or remove a folder of GGUF "
+                          "models (llama.cpp engine)")
+    fold.add_argument("action", choices=["add", "remove", "list"])
+    fold.add_argument("path", nargs="?", default=None)
+
     inf = sub.add_parser("info", help="what a GGUF model is "
                          "(architecture, size, quantization)")
     inf.add_argument("model", nargs="?", default=None)
@@ -930,7 +966,8 @@ def run(argv: Sequence[str] | None = None,
                   "options": cmd_options, "get": cmd_get,
                   "import-ollama": cmd_import_ollama,
                   "quantize": cmd_quantize, "imatrix": cmd_imatrix,
-                  "info": cmd_info, "plan": cmd_plan}
+                  "info": cmd_info, "plan": cmd_plan,
+                  "folder": cmd_folder}
         if args.command in simple:
             return simple[args.command](args, loaded)
         if args.command == "preset":
