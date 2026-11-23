@@ -1,14 +1,17 @@
-Package: cherrycola
+Package: cherrycolallm
 Version: @VERSION@
 Section: utils
 Priority: optional
 Architecture: all
 Depends: python3 (>= 3.12)
+Provides: cherrycola
+Replaces: cherrycola (<< 0.3.0)
+Breaks: cherrycola (<< 0.3.0)
 Recommends: python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1
-Maintainer: GraceOS <https://github.com/itsHarshDabas/CherryCola>
-Homepage: https://github.com/itsHarshDabas/CherryCola
+Maintainer: GraceOS <https://github.com/itsHarshDabas/CherryColaLLM>
+Homepage: https://github.com/itsHarshDabas/CherryColaLLM
 Description: Run AI models on your own PC (Ollama, llama.cpp, LM Studio)
- CherryCola is a command line tool and a GTK chat app for local models.
+ CherryColaLLM is a command line tool and a GTK chat app for local models.
  It drives Ollama, llama.cpp's llama-server or LM Studio's server, with
  per-model load and sampling settings, every llama.cpp option,
  requantizing, and streaming models bigger than RAM from disk.

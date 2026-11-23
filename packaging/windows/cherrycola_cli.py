@@ -1,4 +1,4 @@
-"""Entry point for the Windows build (PyInstaller makes cherrycola.exe)."""
+"""Entry point for the Windows build (PyInstaller makes cherrycolallm.exe)."""
 
 from cherrycola.cli import main
 

@@ -79,23 +79,23 @@ jobs:
         with: { python-version: '3.12' }
       - run: pip install pytest pyinstaller
       - run: python -m pytest -q
-      - run: pyinstaller --onefile --name cherrycola --paths . packaging/windows/cherrycola_cli.py
+      - run: pyinstaller --onefile --name cherrycolallm --paths . packaging/windows/cherrycola_cli.py
       - name: Check the exe runs
         run: |
-          dist\cherrycola.exe --help
-          dist\cherrycola.exe settings --list
+          dist\cherrycolallm.exe --help
+          dist\cherrycolallm.exe settings --list
       - name: Zip it, and fill in the Scoop manifest
         shell: pwsh
         run: |
           $v = "${{ needs.version.outputs.version }}"
           New-Item -ItemType Directory out | Out-Null
-          Copy-Item dist\cherrycola.exe, packaging\windows\README.txt out\
-          $zip = "cherrycola-$v-windows-x64.zip"
+          Copy-Item dist\cherrycolallm.exe, packaging\windows\README.txt out\
+          $zip = "cherrycolallm-$v-windows-x64.zip"
           Compress-Archive -Path out\* -DestinationPath $zip
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-          (Get-Content packaging\windows\scoop.json) -replace '@VERSION@', $v -replace '@SHA256@', $hash | Set-Content cherrycola.json
+          (Get-Content packaging\windows\scoop.json) -replace '@VERSION@', $v -replace '@SHA256@', $hash | Set-Content cherrycolallm.json
           New-Item -ItemType Directory release | Out-Null
-          Move-Item $zip, cherrycola.json release\
+          Move-Item $zip, cherrycolallm.json release\
       - uses: actions/upload-artifact@v4
         with: { name: windows, path: release/* }
 
@@ -113,7 +113,7 @@ jobs:
         run: |
           (cd assets && sha256sum * > SHA256SUMS)
           gh release create "$GITHUB_REF_NAME" assets/* --repo "$GITHUB_REPOSITORY" \
-            --title "CherryCola ${{ needs.version.outputs.version }}" --generate-notes
+            --title "CherryColaLLM ${{ needs.version.outputs.version }}" --generate-notes
 
   aur:
     needs: [release]
@@ -129,11 +129,11 @@ jobs:
           mkdir -p ~/.ssh && printf '%s\n' "$KEY" > ~/.ssh/aur && chmod 600 ~/.ssh/aur
           ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
           export GIT_SSH_COMMAND="ssh -i ~/.ssh/aur"
-          git clone ssh://aur@aur.archlinux.org/cherrycola.git aur-repo
+          git clone ssh://aur@aur.archlinux.org/cherrycolallm.git aur-repo
           cp aur/PKGBUILD aur/.SRCINFO aur-repo/
           cd aur-repo
-          git config user.name "CherryCola release"
-          git config user.email "cherrycola-release@users.noreply.github.com"
+          git config user.name "CherryColaLLM release"
+          git config user.email "cherrycolallm-release@users.noreply.github.com"
           git add PKGBUILD .SRCINFO
           git commit -m "Update to ${GITHUB_REF_NAME#v}" && git push origin HEAD:master
 
@@ -147,5 +147,5 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { name: linux, path: all }
-      - run: mkdir dist && cp all/*.whl all/cherrycola-*.tar.gz dist/ && rm -f dist/*-linux.tar.gz
+      - run: mkdir dist && cp all/*.whl all/cherrycolallm-*.tar.gz dist/ && rm -f dist/*-linux.tar.gz
       - uses: pypa/gh-action-pypi-publish@release/v1

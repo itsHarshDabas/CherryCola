@@ -1,4 +1,4 @@
-"""Saved conversations for the CherryCola chat app, one JSON file per chat.
+"""Saved conversations for the CherryColaLLM chat app, one JSON file per chat.
 
 Stored in $XDG_DATA_HOME/cherrycola/chats (default ~/.local/share). Kept free
 of GTK so it can be tested anywhere.

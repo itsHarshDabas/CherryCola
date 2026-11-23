@@ -1,4 +1,4 @@
-"""Free web search for CherryCola: DuckDuckGo (default) or SearXNG.
+"""Free web search for CherryColaLLM: DuckDuckGo (default) or SearXNG.
 
 Stdlib only. No API keys. Results and page text are untrusted text;
 the model only writes text, it never runs anything.
@@ -35,7 +35,7 @@ except Exception:  # pragma: no cover - package metadata fallback
     _version = "0.0.0"
 
 USER_AGENT = (
-    f"CherryCola/{_version} (+https://github.com/itsHarshDabas/GraceOS)"
+    f"CherryColaLLM/{_version} (+https://github.com/itsHarshDabas/GraceOS)"
 )
 
 _SEARCH_TIMEOUT = 10

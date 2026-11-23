@@ -1,10 +1,13 @@
 {
     "version": "@VERSION@",
     "description": "Run AI models on your own PC: Ollama, llama.cpp or LM Studio, with every load setting",
-    "homepage": "https://github.com/itsHarshDabas/CherryCola",
+    "homepage": "https://github.com/itsHarshDabas/CherryColaLLM",
     "license": "Unknown",
-    "url": "https://github.com/itsHarshDabas/CherryCola/releases/download/v@VERSION@/cherrycola-@VERSION@-windows-x64.zip",
+    "url": "https://github.com/itsHarshDabas/CherryColaLLM/releases/download/v@VERSION@/cherrycolallm-@VERSION@-windows-x64.zip",
     "hash": "@SHA256@",
-    "bin": "cherrycola.exe",
+    "bin": [
+        "cherrycolallm.exe",
+        ["cherrycolallm.exe", "cherrycola"]
+    ],
     "notes": "Install an engine too: Ollama, llama.cpp or LM Studio. See README.txt."
 }

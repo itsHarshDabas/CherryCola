@@ -1,4 +1,4 @@
-"""The model settings side panel of the CherryCola chat app.
+"""The model settings side panel of the CherryColaLLM chat app.
 
 Every setting in profiles.SETTINGS gets a row; hovering a row explains it.
 Settings are saved per model (or for all models) as soon as they change,
@@ -28,7 +28,7 @@ ENGINES = [("auto", "Automatic"), ("ollama", "Ollama"),
            ("llamacpp", "llama.cpp"), ("lmstudio", "LM Studio")]
 ENGINE_HELP = {
     "auto": "Ollama when it's installed, else LM Studio's server.",
-    "ollama": "Easy downloads with cherrycola pull. Most load settings, "
+    "ollama": "Easy downloads with cherrycolallm pull. Most load settings, "
               "but not every llama.cpp option.",
     "llamacpp": "Every setting and llama.cpp option, requantizing and "
                 "streaming big models from disk. Uses GGUF files.",
@@ -392,7 +392,7 @@ class SettingsPanel(Gtk.Box):
                               subtitle=f"{count} folder"
                               + ("s" if count != 1 else ""))
         row.set_tooltip_text(
-            "Folders CherryCola looks in for GGUF models, for example LM "
+            "Folders CherryColaLLM looks in for GGUF models, for example LM "
             "Studio's models folder. Models found here run with the "
             "llama.cpp engine and appear in the model menu.")
         home = os.path.expanduser("~")
@@ -400,7 +400,7 @@ class SettingsPanel(Gtk.Box):
         def short(path) -> str:
             text = str(path)
             return "~" + text[len(home):] if text.startswith(home) else text
-        own = Adw.ActionRow(use_markup=False, title="CherryCola models",
+        own = Adw.ActionRow(use_markup=False, title="CherryColaLLM models",
                             subtitle=short(llamacpp.models_dir(cfg)),
                             subtitle_lines=1)
         own.set_tooltip_text(f"{llamacpp.models_dir(cfg)}\nDownloads and "

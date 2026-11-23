@@ -1,6 +1,6 @@
 """The llama.cpp engine: GGUF files on disk, run by ``llama-server``.
 
-CherryCola starts one ``llama-server`` per user, on demand, with every load
+CherryColaLLM starts one ``llama-server`` per user, on demand, with every load
 setting turned into a command-line flag. When the model or a load setting
 changes, the server is restarted with the new flags. Also here: listing and
 downloading GGUF files, importing models Ollama already downloaded,
@@ -72,7 +72,7 @@ def models_dir(cfg: config_mod.Config) -> Path:
 
 
 def extra_dirs(cfg: config_mod.Config) -> list[Path]:
-    """Folders people added (cherrycola folder add, or the app)."""
+    """Folders people added (cherrycolallm folder add, or the app)."""
     return [Path(os.path.expanduser(d)) for d in cfg.model_dirs]
 
 
@@ -93,7 +93,7 @@ def _scan(root: Path, prefix: str, out: dict[str, Path]) -> None:
 def list_local(cfg: config_mod.Config) -> dict[str, Path]:
     """Model name -> first file.
 
-    Models in CherryCola's own folder are named by their path in it (no
+    Models in CherryColaLLM's own folder are named by their path in it (no
     .gguf); models in an added folder get that folder's name in front.
     """
     out: dict[str, Path] = {}
@@ -161,7 +161,7 @@ def remove(cfg: config_mod.Config, name: str) -> None:
         raise LlamaError(f"no model named {name} in {models_dir(cfg)}")
     path = local[name]
     if not path.is_relative_to(models_dir(cfg)):
-        raise LlamaError(f"{name} is in a folder you added; CherryCola only "
+        raise LlamaError(f"{name} is in a folder you added; CherryColaLLM only "
                          f"deletes models in {models_dir(cfg)}")
     if loaded_model() == name:
         stop()
@@ -219,7 +219,7 @@ def server_caps(binary: str) -> set[str]:
     return _CAPS[key]
 
 
-# Flags CherryCola sets itself, or that would let the server reach the
+# Flags CherryColaLLM sets itself, or that would let the server reach the
 # network, run tools, download models or write files outside its log:
 # not offered as raw options.
 _RESERVED = re.compile(
@@ -787,7 +787,7 @@ def quantize(cfg: config_mod.Config, src: str, qtype: str,
             f"Add --allow-requantize to do it anyway")
     if qtype in NEEDS_IMATRIX and not imatrix:
         raise LlamaError(f"{qtype} needs an importance matrix: "
-                         f"cherrycola imatrix {src} TEXT_FILE first, then "
+                         f"cherrycolallm imatrix {src} TEXT_FILE first, then "
                          f"pass --imatrix")
     binary = shutil.which(cfg.llama_quantize)
     if binary is None:

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Launcher: installed as /usr/bin/cherrycola-chat, package at /usr/lib/cherrycola."""
+"""Launcher: installed as /usr/bin/cherrycolallm-chat (and the cherrycola-chat alias), package at /usr/lib/cherrycola."""
 
 import os
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _CANDIDATES = [
-    # Installed: /usr/bin/cherrycola-chat -> /usr/lib/cherrycola.
+    # Installed: /usr/bin/cherrycolallm-chat -> /usr/lib/cherrycola.
     os.path.join(_HERE, "..", "lib", "cherrycola"),
-    # Repo checkout: services/cherrycola/bin/cherrycola-chat -> services/cherrycola.
+    # Repo checkout: bin/cherrycolallm-chat -> the checkout.
     os.path.join(_HERE, ".."),
 ]
 for _cand in _CANDIDATES:

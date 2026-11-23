@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
 Version=1.0
-Name=CherryCola
+Name=CherryColaLLM
 GenericName=AI Chat
 Comment=Chat with AI models running on this PC
-Exec=cherrycola-chat
+Exec=cherrycolallm-chat
 Icon=org.graceos.CherryCola
 Terminal=false
 Categories=Utility;Development;

@@ -38,7 +38,7 @@ def _make_ddg_handler(page: str):
     seen = {}
 
     class Handler(BaseHTTPRequestHandler):
-        server_version = "CherryColaFakeDDG"
+        server_version = "CherryColaLLMFakeDDG"
 
         def log_message(self, *args):
             pass
@@ -86,7 +86,7 @@ def test_ddg_parses_redirect_direct_and_duplicate(ddg_cfg, ddg_server):
         ("Second result", "https://example.com/two", "Second snippet text."),
     ]
     assert "q=hello" in seen["body"]
-    assert seen["ua"].startswith("CherryCola/")
+    assert seen["ua"].startswith("CherryColaLLM/")
 
 
 def test_searxng_maps_json(tmp_path, monkeypatch):
@@ -133,7 +133,7 @@ PAGE_HTML = """<html><head><title>t</title><style>.x{}</style></head>
 
 def _make_page_handler(page: bytes, ctype: str):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "CherryColaFakePage"
+        server_version = "CherryColaLLMFakePage"
 
         def log_message(self, *args):
             pass

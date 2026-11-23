@@ -171,13 +171,13 @@ SETTINGS: dict[str, Setting] = {s.key: s for s in (
     # --- other ----------------------------------------------------------
     Setting("system_prompt", "str", "other", "System prompt",
             "Instructions the model reads before every chat. Replaces "
-            "CherryCola's default."),
+            "CherryColaLLM's default."),
     Setting("preset", "choice", "other", "Preset",
             "A ready-made set of sampling values. Anything you set by hand "
             "wins over the preset.",
             choices=("precise", "balanced", "creative", "code")),
     Setting("llama_args", "dict", "advanced", "llama.cpp options",
-            "Any other llama-server option, by its flag name. CherryCola "
+            "Any other llama-server option, by its flag name. CherryColaLLM "
             "checks each against the installed llama-server.",
             engines=_LLAMA),
     Setting("draft_model", "str", "other", "Draft model",
@@ -215,7 +215,7 @@ def parse_value(key: str, raw):
     spec = SETTINGS.get(key)
     if spec is None:
         raise SettingError(f"unknown setting {key!r} "
-                           f"(see: cherrycola settings --list)")
+                           f"(see: cherrycolallm settings --list)")
     try:
         if spec.kind == "int":
             if isinstance(raw, bool):

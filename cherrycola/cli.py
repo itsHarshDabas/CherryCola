@@ -1,4 +1,4 @@
-"""CLI: ``cherrycola ask|chat|status|models|pull|use|backend|start|stop``,
+"""CLI: ``cherrycolallm ask|chat|status|models|pull|use|backend|start|stop``,
 model settings (``settings|set|unset|preset|flag|options``) and llama.cpp
 model tools (``get|import-ollama|quantize|imatrix|info|plan``)."""
 
@@ -27,7 +27,7 @@ EXIT_MODEL_MISSING = 3
 
 
 def _err(message: str) -> None:
-    print(f"CherryCola: {message}", file=sys.stderr)
+    print(f"CherryColaLLM: {message}", file=sys.stderr)
 
 
 def _state_dir() -> Path:
@@ -160,16 +160,16 @@ def ensure_running(backend: str, cfg: config_mod.Config,
 
 def _missing_model_message(model: str, backend: str = "ollama") -> str:
     if backend == "llamacpp":
-        return (f"no GGUF model named {model}. Get one with: cherrycola get "
+        return (f"no GGUF model named {model}. Get one with: cherrycolallm get "
                 f"OWNER/REPO:Q4_K_M, or reuse an Ollama download with: "
-                f"cherrycola import-ollama MODEL")
+                f"cherrycolallm import-ollama MODEL")
     size = config_mod.MODEL_SIZES_GB.get(model)
     if size is not None:
         return (
             f"the model {model} isn't downloaded yet "
-            f"(about {size} GB). Run: cherrycola pull"
+            f"(about {size} GB). Run: cherrycolallm pull"
         )
-    return f"the model {model} isn't downloaded yet. Run: cherrycola pull"
+    return f"the model {model} isn't downloaded yet. Run: cherrycolallm pull"
 
 
 def _settings_for(args, model: str) -> dict:
@@ -324,7 +324,7 @@ def cmd_chat(args, cfg: config_mod.Config) -> int:
     history: list[dict[str, str]] = [
         {"role": "system", "content": be.SYSTEM_PROMPT}]
     web_mode = False
-    print(f"CherryCola ({backend}/{model}). /exit quits, /clear resets.")
+    print(f"CherryColaLLM ({backend}/{model}). /exit quits, /clear resets.")
     while True:
         try:
             line = input("> ")
@@ -444,7 +444,7 @@ def cmd_pull(args, cfg: config_mod.Config) -> int:
     backend = be.resolve_backend(cfg)
     model = args.model or be.resolve_model(backend, cfg)
     if backend == "llamacpp":
-        _err("the llama.cpp engine downloads with: cherrycola get "
+        _err("the llama.cpp engine downloads with: cherrycolallm get "
              "OWNER/REPO:QUANT (from Hugging Face)")
         return EXIT_USAGE
     if backend != "ollama":
@@ -553,7 +553,7 @@ def cmd_settings(args, cfg: config_mod.Config) -> int:
     if backend == "ollama" and any(k in own for k in (
             "kv_cache_type", "flash_attention")):
         print("Ollama sets kv_cache_type and flash_attention for the whole "
-              "server: use cherrycola set --all, then stop and start.")
+              "server: use cherrycolallm set --all, then stop and start.")
     return EXIT_OK
 
 
@@ -600,7 +600,7 @@ def cmd_unset(args, cfg: config_mod.Config) -> int:
 def cmd_flag(args, cfg: config_mod.Config) -> int:
     """Set any llama-server option by its flag."""
     if not args.flag.startswith("-"):
-        _err("give the option as it appears in cherrycola options, "
+        _err("give the option as it appears in cherrycolallm options, "
              "for example --mirostat")
         return EXIT_USAGE
     target = _target(args, cfg)
@@ -672,7 +672,7 @@ def cmd_get(args, cfg: config_mod.Config) -> int:
         sys.stdout.write("\n")
         _err(str(exc))
         return EXIT_UNREACHABLE
-    print(f"\nSaved as {name}. Use it with: cherrycola use {name}")
+    print(f"\nSaved as {name}. Use it with: cherrycolallm use {name}")
     return EXIT_OK
 
 
@@ -683,7 +683,7 @@ def cmd_import_ollama(args, cfg: config_mod.Config) -> int:
         _err(str(exc))
         return EXIT_MODEL_MISSING
     print(f"Linked {args.model} as {name} (no copy). Use it with: "
-          f"cherrycola use {name}")
+          f"cherrycolallm use {name}")
     return EXIT_OK
 
 
@@ -706,14 +706,14 @@ def cmd_imatrix(args, cfg: config_mod.Config) -> int:
     except llamacpp.LlamaError as exc:
         _err(str(exc))
         return EXIT_USAGE
-    print(f"Wrote {out}. Use it with: cherrycola quantize {args.model} "
+    print(f"Wrote {out}. Use it with: cherrycolallm quantize {args.model} "
           f"TYPE --imatrix {out}")
     return EXIT_OK
 
 
 def cmd_folder(args, cfg: config_mod.Config) -> int:
     if args.action == "list":
-        print(f"{llamacpp.models_dir(cfg)}  (CherryCola's own)")
+        print(f"{llamacpp.models_dir(cfg)}  (CherryColaLLM's own)")
         for d in llamacpp.extra_dirs(cfg):
             print(d)
         return EXIT_OK
@@ -724,7 +724,7 @@ def cmd_folder(args, cfg: config_mod.Config) -> int:
         if args.action == "add":
             path, count = llamacpp.add_folder(cfg, args.path)
             print(f"Added {path} ({count} GGUF models). They run with the "
-                  f"llama.cpp engine: cherrycola backend llamacpp")
+                  f"llama.cpp engine: cherrycolallm backend llamacpp")
             return EXIT_OK
     except llamacpp.LlamaError as exc:
         _err(str(exc))
@@ -739,7 +739,7 @@ def cmd_folder(args, cfg: config_mod.Config) -> int:
 def _gguf_info(cfg, model: str) -> gguf.ModelInfo | None:
     path = llamacpp.find_model(cfg, model)
     if path is None:
-        _err(f"no GGUF model named {model} (cherrycola models with the "
+        _err(f"no GGUF model named {model} (cherrycolallm models with the "
              f"llamacpp backend lists them)")
         return None
     try:
@@ -800,7 +800,7 @@ def _add_target(p) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="cherrycola", description="GraceOS local model CLI")
+        prog="cherrycolallm", description="GraceOS local model CLI")
     sub = parser.add_subparsers(dest="command", required=True)
 
     ask = sub.add_parser("ask", help="ask one question (streams the answer)")
@@ -843,7 +843,7 @@ def build_parser() -> argparse.ArgumentParser:
     pre.add_argument("name", choices=list(profiles.PRESETS))
 
     flag = sub.add_parser("flag", help="set any llama-server option "
-                          "(see: cherrycola options)")
+                          "(see: cherrycolallm options)")
     _add_target(flag)
     flag.add_argument("--remove", action="store_true")
     flag.add_argument("flag")
@@ -869,7 +869,7 @@ def build_parser() -> argparse.ArgumentParser:
     qz.add_argument("type", help="Q4_K_M, Q5_K_M, Q8_0, IQ4_XS, ...")
     qz.add_argument("--out", help="name for the new model")
     qz.add_argument("--imatrix", help="importance matrix file "
-                    "(see: cherrycola imatrix)")
+                    "(see: cherrycolallm imatrix)")
     qz.add_argument("--allow-requantize", action="store_true",
                     help="allow quantizing an already quantized model")
     qz.add_argument("--threads", type=int)

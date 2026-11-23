@@ -13,7 +13,7 @@ from cherrycola import config as config_mod
 
 def _make_handler(kind: str):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "CherryColaFake"
+        server_version = "CherryColaLLMFake"
 
         def log_message(self, *args):  # quiet
             pass

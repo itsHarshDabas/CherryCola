@@ -1,16 +1,18 @@
 [project]
-name = "cherrycola"
-version = "0.2.0"
+name = "cherrycolallm"
+version = "0.3.0"
 description = "GraceOS local model runtime (Ollama, llama.cpp, LM Studio; stdlib only)"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []
 
 [project.scripts]
-cherrycola = "cherrycola.cli:main"
+cherrycolallm = "cherrycola.cli:main"
+cherrycola = "cherrycola.cli:main"  # the old name, kept as an alias
 
 [project.gui-scripts]
-cherrycola-chat = "cherrycola.gui:main"  # needs PyGObject, GTK 4 and libadwaita
+cherrycolallm-chat = "cherrycola.gui:main"  # needs PyGObject, GTK 4 and libadwaita
+cherrycola-chat = "cherrycola.gui:main"
 
 [dependency-groups]
 dev = [
