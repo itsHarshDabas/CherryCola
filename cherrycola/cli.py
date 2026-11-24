@@ -152,7 +152,8 @@ def ensure_running(backend: str, cfg: config_mod.Config,
         return EXIT_OK
     if backend != "ollama":
         if not be.server_reachable(backend, cfg):
-            _err(f"lm studio server is not reachable at {cfg.lmstudio_url}")
+            _err(f"LM Studio's server is not reachable at {cfg.lmstudio_url}. "
+                 f"Start it in LM Studio (Developer > Start server)")
             return EXIT_UNREACHABLE
         return EXIT_OK
     return start_server(cfg, spawn=spawn)
@@ -163,6 +164,10 @@ def _missing_model_message(model: str, backend: str = "ollama") -> str:
         return (f"no GGUF model named {model}. Get one with: cherrycolallm get "
                 f"OWNER/REPO:Q4_K_M, or reuse an Ollama download with: "
                 f"cherrycolallm import-ollama MODEL")
+    if backend == "lmstudio":
+        return (f"LM Studio has no model named {model} loaded. Download or "
+                f"load it in the LM Studio app, or pick another with: "
+                f"cherrycolallm use MODEL")
     size = config_mod.MODEL_SIZES_GB.get(model)
     if size is not None:
         return (
@@ -376,7 +381,7 @@ def cmd_status(args, cfg: config_mod.Config) -> int:
             models = be.list_models(backend, cfg)
         except be.BackendError:
             models = []
-        installed = model in models
+        installed = be.model_listed(backend, model, models)
         running = be.running_model(backend, cfg)
     else:
         # Unreachable: no probing (would just time out); RAM default.
