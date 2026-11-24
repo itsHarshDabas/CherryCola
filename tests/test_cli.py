@@ -208,3 +208,20 @@ def test_remove_model(ollama_cfg, capsys):
 def test_status_reports_configured_backend(ollama_cfg, capsys):
     run(["status", "--json"], cfg=ollama_cfg)
     assert json.loads(capsys.readouterr().out)["configured_backend"] == "ollama"
+
+
+def test_model_listed_matches_untagged_ollama_pull():
+    # `ollama pull llama3.2` lists as llama3.2:latest; `cherrycola use llama3.2` must still find it.
+    assert be.model_listed("ollama", "llama3.2", ["llama3.2:latest"])
+    assert be.model_listed("ollama", "hf.co/org/repo", ["hf.co/org/repo:latest"])
+    assert not be.model_listed("ollama", "llama3.2", ["llama3.2:1b"])
+    assert not be.model_listed("ollama", "qwen3:8b", ["qwen3:4b"])
+    assert not be.model_listed("lmstudio", "lm", ["lm:latest"])
+
+
+def test_missing_model_message_names_the_right_fix():
+    from cherrycola.cli import _missing_model_message
+    assert "cherrycolallm pull" in _missing_model_message("qwen3:4b", "ollama")
+    lm = _missing_model_message("lm-model", "lmstudio")
+    assert "LM Studio app" in lm and "pull" not in lm
+    assert "cherrycolallm get" in _missing_model_message("m", "llamacpp")

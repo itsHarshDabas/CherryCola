@@ -18,6 +18,7 @@ __all__ = [
     "BackendResult",
     "ThinkStripper",
     "check_model_installed",
+    "model_listed",
     "detect_backend",
     "http_get_json",
     "iter_chat_chunks",
@@ -225,10 +226,20 @@ def running_model(backend: str, cfg: config_mod.Config) -> str | None:
     return models[0] if models else None
 
 
+def model_listed(backend: str, model: str, models: list[str]) -> bool:
+    """Whether ``model`` is one of ``models``. Ollama lists an untagged pull
+    (``ollama pull llama3.2``) as ``llama3.2:latest``, so the two match."""
+    if model in models:
+        return True
+    if backend == "ollama" and model and ":" not in model.rsplit("/", 1)[-1]:
+        return f"{model}:latest" in models
+    return False
+
+
 def check_model_installed(backend: str, model: str,
                           cfg: config_mod.Config) -> bool:
     try:
-        return model in list_models(backend, cfg)
+        return model_listed(backend, model, list_models(backend, cfg))
     except BackendError:
         return False
 
