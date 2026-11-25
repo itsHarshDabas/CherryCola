@@ -74,7 +74,8 @@ def list_chats(d: Path | None = None) -> list[Chat]:
             out.append(load(path.stem, d))
         except (OSError, ValueError, TypeError):
             continue
-    return sorted(out, key=lambda c: c.updated, reverse=True)
+    # Windows' clock can give two quick saves the same time; ids start with the creation time.
+    return sorted(out, key=lambda c: (c.updated, c.id), reverse=True)
 
 
 def delete(chat_id: str, d: Path | None = None) -> None:
