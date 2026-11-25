@@ -185,9 +185,11 @@ def download_url(cfg: config_mod.Config, url: str, on_progress=None) -> Path:
                 if on_progress:
                     on_progress(name, done, total)
     with open(part, "rb") as fh:
-        if fh.read(4) != b"GGUF":
-            part.unlink()
-            raise be.BackendError(f"{name} is not a GGUF file")
+        magic = fh.read(4)
+    # Windows can't delete a file that is still open, so check after closing it.
+    if magic != b"GGUF":
+        part.unlink()
+        raise be.BackendError(f"{name} is not a GGUF file")
     part.rename(dest)
     return dest
 
