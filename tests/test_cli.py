@@ -110,15 +110,16 @@ def test_ask_stdin_dash(ollama_cfg, capsys, monkeypatch):
 def test_pull_streams_progress(ollama_cfg, capsys):
     assert run(["pull", "qwen3:4b"], cfg=ollama_cfg) == 0
     out = capsys.readouterr().out
-    assert "Pulling qwen3:4b" in out
+    assert "Getting qwen3:4b through ollama" in out
     assert "downloads from the internet" in out
     assert "100.0%" in out
     assert "Pulled qwen3:4b." in out
 
 
-def test_pull_lmstudio_refused(lmstudio_cfg, capsys):
-    assert run(["pull"], cfg=lmstudio_cfg) == 1
-    assert "LM Studio app" in capsys.readouterr().err
+def test_pull_lmstudio_needs_lms(lmstudio_cfg, capsys, monkeypatch):
+    monkeypatch.setattr("cherrycola.routes.shutil.which", lambda name: None)
+    assert run(["pull"], cfg=lmstudio_cfg) == 2
+    assert "lms command" in capsys.readouterr().err
 
 
 def test_config_rewrite_keeps_comments(tmp_path):
@@ -223,5 +224,5 @@ def test_missing_model_message_names_the_right_fix():
     from cherrycola.cli import _missing_model_message
     assert "cherrycolallm pull" in _missing_model_message("qwen3:4b", "ollama")
     lm = _missing_model_message("lm-model", "lmstudio")
-    assert "LM Studio app" in lm and "pull" not in lm
-    assert "cherrycolallm get" in _missing_model_message("m", "llamacpp")
+    assert "cherrycolallm pull lm-model" in lm and "lms" in lm
+    assert "cherrycolallm pull OWNER/REPO" in _missing_model_message("m", "llamacpp")
