@@ -113,9 +113,11 @@ def parse_windows_gpus(text: str) -> list[Gpu]:
     return gpus
 
 
-def detect_gpus(pci: Path = Path("/sys/bus/pci/devices")) -> list[Gpu]:
-    if osdeps.WINDOWS:
-        return _windows_gpus()
+def detect_gpus(pci: Path | None = None) -> list[Gpu]:
+    if pci is None:
+        if osdeps.WINDOWS:
+            return _windows_gpus()
+        pci = Path("/sys/bus/pci/devices")
     gpus = []
     for dev in sorted(pci.iterdir()) if pci.is_dir() else []:
         if not _read(dev / "class").startswith("0x03"):  # display controller

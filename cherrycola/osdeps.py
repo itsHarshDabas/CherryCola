@@ -71,9 +71,10 @@ def which(name: str) -> str | None:
     if found or not WINDOWS or os.path.isabs(name):
         return found
     for folder in _windows_extra_dirs(name):
-        found = shutil.which(name, path=str(folder))
-        if found:
-            return found
+        for ext in ("", ".exe", ".cmd", ".bat"):
+            candidate = folder / (name + ext)
+            if candidate.is_file():
+                return str(candidate)
     return None
 
 

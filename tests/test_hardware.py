@@ -73,10 +73,6 @@ def test_windows_which_finds_engines_off_path(tmp_path, monkeypatch):
     (exe / "ollama.exe").write_text("x")
     monkeypatch.setattr(osdeps, "WINDOWS", True)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    monkeypatch.setattr(osdeps.shutil, "which",
-                        lambda name, path=None: (
-                            str(exe / "ollama.exe") if path and
-                            name == "ollama" and str(exe) == path
-                            else None))
+    monkeypatch.setattr(osdeps.shutil, "which", lambda name: None)
     assert osdeps.which("ollama") == str(exe / "ollama.exe")
     assert osdeps.which("nope") is None
