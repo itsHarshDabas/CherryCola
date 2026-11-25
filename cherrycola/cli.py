@@ -81,7 +81,8 @@ def start_server(cfg: config_mod.Config, spawn=_spawn,
                  timeout: float = 20) -> int:
     if be.server_reachable("ollama", cfg):
         return EXIT_OK
-    if be.shutil.which("ollama") is None:
+    ollama_bin = osdeps.which("ollama")
+    if ollama_bin is None:
         _err("ollama is not installed, and its server is not running")
         return EXIT_UNREACHABLE
     log = _log_file()
@@ -90,7 +91,8 @@ def start_server(cfg: config_mod.Config, spawn=_spawn,
     # KV cache type and flash attention are server-wide in Ollama.
     env = profiles.ollama_server_env(profiles.load_profiles().get("*", {}))
     try:
-        proc = spawn(["ollama", "serve"], log, **({"env": env} if env else {}))
+        proc = spawn(["ollama" if be.shutil.which("ollama") else ollama_bin,
+                      "serve"], log, **({"env": env} if env else {}))
     except (OSError, be.BackendError) as exc:
         _err(f"could not start ollama: {exc}")
         return EXIT_UNREACHABLE
@@ -472,7 +474,7 @@ def cmd_recommend(args, cfg: config_mod.Config) -> int:
              else f"processor ({r['ram_gb']} GB RAM)")
     print(f"Models run on the {where}.")
     state = ("installed" if r["engine_installed"]
-             else f"install it: sudo pacman -S {r['engine']}")
+             else f"install it: {hardware.install_hint(r['engine'])}")
     print(f"Engine: {r['engine']} - {r['engine_reason']} ({state})")
     print(f"Recommended: {r['recommended']}\n")
     for m in r["models"]:

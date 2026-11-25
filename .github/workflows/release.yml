@@ -84,6 +84,15 @@ jobs:
         run: |
           dist\cherrycolallm.exe --help
           dist\cherrycolallm.exe settings --list
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $v = "${{ needs.version.outputs.version }}"
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress }
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DAppVersion=$v" "/DSourceExe=$PWD\dist\cherrycolallm.exe" "/O$PWD\installer" packaging\windows\cherrycolallm.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Zip it, and fill in the Scoop manifest
         shell: pwsh
         run: |
@@ -96,6 +105,7 @@ jobs:
           (Get-Content packaging\windows\scoop.json) -replace '@VERSION@', $v -replace '@SHA256@', $hash | Set-Content cherrycolallm.json
           New-Item -ItemType Directory release | Out-Null
           Move-Item $zip, cherrycolallm.json release\
+          Move-Item installer\*.exe release\
       - uses: actions/upload-artifact@v4
         with: { name: windows, path: release/* }
 

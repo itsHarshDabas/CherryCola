@@ -32,6 +32,7 @@ from pathlib import Path
 
 from . import backends as be
 from . import config as config_mod
+from . import osdeps
 
 __all__ = ["Spec", "classify", "pull", "unload", "was_loaded"]
 
@@ -125,7 +126,7 @@ def classify(text: str, backend: str) -> Spec:
 # ---- pulling ------------------------------------------------------------------
 
 def _which(name: str) -> str | None:
-    return shutil.which(name)
+    return osdeps.which(name)
 
 
 def _run(args: list[str], timeout: float | None = None) -> None:

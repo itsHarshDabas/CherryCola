@@ -51,3 +51,28 @@ def test_recommend_gpu():
 def test_recommend_tiny_pc():
     r = hw.recommend(3 * GB, [])
     assert r["recommended"] == "qwen3:1.7b" or r["recommended"] == "qwen3:0.6b"
+
+
+def test_parse_windows_gpus(monkeypatch):
+    monkeypatch.setattr(hw, "_nvidia_vram", lambda: 12 * GB)
+    text = (
+        "NVIDIA GeForce RTX 4070|PCI\\VEN_10DE&DEV_2786|4293918720\n"
+        "AMD Radeon(TM) Graphics|PCI\\VEN_1002&DEV_164E|536870912\n"
+        "Microsoft Basic Display Adapter|ROOT\\X|0\n"
+        "Intel(R) Arc(TM) A770|PCI\\VEN_8086&DEV_56A0|4294967295\n"
+    )
+    assert hw.parse_windows_gpus(text) == [
+        hw.Gpu("nvidia", 12 * GB), hw.Gpu("amd", GB // 2),
+        hw.Gpu("intel", 4294967295)]
+
+
+def test_windows_which_finds_engines_off_path(tmp_path, monkeypatch):
+    from cherrycola import osdeps
+    exe = tmp_path / "Programs" / "Ollama"
+    exe.mkdir(parents=True)
+    (exe / "ollama.exe").write_text("x")
+    monkeypatch.setattr(osdeps, "WINDOWS", True)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(osdeps.shutil, "which", lambda name: None)
+    assert osdeps.which("ollama") == str(exe / "ollama.exe")
+    assert osdeps.which("nope") is None

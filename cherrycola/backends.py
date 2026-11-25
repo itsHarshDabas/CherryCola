@@ -11,6 +11,7 @@ import urllib.request
 from dataclasses import dataclass
 
 from . import config as config_mod
+from . import osdeps
 from . import profiles
 
 __all__ = [
@@ -138,7 +139,7 @@ def server_reachable(backend: str, cfg: config_mod.Config) -> bool:
     if backend == "llamacpp":
         # llama-server starts per model, on demand: "reachable" means the
         # engine is installed.
-        return shutil.which(cfg.llama_server) is not None
+        return osdeps.which(cfg.llama_server) is not None
     base = cfg.ollama_url if backend == "ollama" else cfg.lmstudio_url
     probe = "/api/version" if backend == "ollama" else "/v1/models"
     try:
@@ -150,7 +151,7 @@ def server_reachable(backend: str, cfg: config_mod.Config) -> bool:
 
 def detect_backend(cfg: config_mod.Config) -> str:
     """auto: Ollama if the CLI exists or its server answers, else LM Studio."""
-    if shutil.which("ollama") is not None:
+    if osdeps.which("ollama") is not None:
         return "ollama"
     if server_reachable("ollama", cfg):
         return "ollama"
