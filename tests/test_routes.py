@@ -228,7 +228,7 @@ def test_default_ollama_model_on_llamacpp_downloads_its_gguf(monkeypatch,
                                                              tmp_path):
     cfg = config_mod.Config(backend="llamacpp", models_dir=str(tmp_path))
     got = []
-    monkeypatch.setattr("cherrycola.llamacpp.ollama_dirs", lambda: [])
+    monkeypatch.setattr("cherrycola.llamacpp.ollama_dirs", list)
     monkeypatch.setattr("cherrycola.llamacpp.download",
                         lambda c, spec, prog=None: got.append(spec) or "x")
     routes.pull(cfg, "qwen3:4b")
