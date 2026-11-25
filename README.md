@@ -44,7 +44,13 @@ llama.cpp (`winget install llama.cpp`), or LM Studio. Engines installed to
 their usual folders are found even when they aren't on PATH. Same commands as
 on Linux (`cherrycolallm recommend`, `pull`, `ask`); settings are in
 `%APPDATA%\CherryCola\grace\`, models, chats and logs in
-`%LOCALAPPDATA%\CherryCola\`. The GTK chat app is Linux-only for now.
+`%LOCALAPPDATA%\CherryCola\`. The setup installs **CherryColaLLM**, a native window (Rust) with chats, model
+switching, a Models page (get by name, Hugging Face repo, link or file) and
+attachments: drop in images, documents (text, Word, Excel, PowerPoint, PDF),
+audio or video. It drives the same `cherrycolallm` command, so it works with
+Ollama, llama.cpp and LM Studio. Images need a model that can see (gemma3,
+llava...); video needs `ffmpeg` and audio a transcriber (`whisper`), see
+`cherrycola/attach.py`. The GTK chat app stays for Linux.
 
 Or run from this directory with [uv](https://docs.astral.sh/uv/):
 
@@ -259,3 +265,10 @@ uv run pytest -q
 Tests spin up fake Ollama/LM Studio servers on localhost (port 0) — no
 network, no real `ollama` process. The spawn function is injectable
 (`start_server(cfg, spawn=...)`) and monkeypatched in tests.
+
+## Attachments from the command line
+
+```sh
+cherrycolallm ask --attach report.docx --attach chart.png "Summarise this"
+cherrycolallm ask --history earlier.json "and the next step?"
+```

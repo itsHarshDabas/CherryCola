@@ -350,11 +350,30 @@ def prepare(backend: str, cfg: config_mod.Config, model: str,
         raise BackendError(str(exc)) from exc
 
 
+def _openai_images(messages: list[dict]) -> list[dict]:
+    """Ollama takes ``images`` on a message; llama.cpp and LM Studio want
+    OpenAI-style content parts with data: URLs."""
+    out = []
+    for m in messages:
+        images = m.get("images")
+        if not images:
+            out.append(m)
+            continue
+        parts = [{"type": "text", "text": m.get("content", "")}]
+        parts += [{"type": "image_url",
+                   "image_url": {"url": "data:image/jpeg;base64," + b}}
+                  for b in images]
+        out.append({"role": m["role"], "content": parts})
+    return out
+
+
 def _open_chat_stream(backend: str, cfg: config_mod.Config,
                       model: str, messages: list[dict[str, str]],
                       settings: dict):
-    body: dict = {"model": model, "stream": True,
-                  "messages": with_system_prompt(messages, settings)}
+    msgs = with_system_prompt(messages, settings)
+    if backend != "ollama":
+        msgs = _openai_images(msgs)
+    body: dict = {"model": model, "stream": True, "messages": msgs}
     if backend == "ollama":
         url = _url(cfg.ollama_url, "/api/chat")
         body.update(profiles.ollama_request(settings)[0])

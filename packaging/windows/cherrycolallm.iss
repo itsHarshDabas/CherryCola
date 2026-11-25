@@ -1,8 +1,11 @@
 ; Inno Setup script: builds cherrycolallm-<version>-windows-x64-setup.exe.
 ; Per-user install (no admin prompt), adds the folder to the user's PATH.
-; Build:  iscc /DAppVersion=0.3.0 /DSourceExe=dist\cherrycolallm.exe packaging\windows\cherrycolallm.iss
+; Build:  iscc /DAppVersion=1.0 /DSourceExe=dist\cherrycolallm.exe /DGuiExe=gui\target\release\cherrycolallm-gui.exe packaging\windows\cherrycolallm.iss
 #ifndef AppVersion
   #define AppVersion "0.0.0"
+#endif
+#ifndef GuiExe
+  #define GuiExe "..\..\gui\target\release\cherrycolallm-gui.exe"
 #endif
 #ifndef SourceExe
   #define SourceExe "..\..\dist\cherrycolallm.exe"
@@ -17,6 +20,8 @@ AppPublisherURL=https://github.com/itsHarshDabas/CherryColaLLM
 DefaultDirName={localappdata}\Programs\CherryColaLLM
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
+
+UninstallDisplayIcon={app}\cherrycolallm-gui.exe
 OutputBaseFilename=cherrycolallm-{#AppVersion}-windows-x64-setup
 Compression=lzma2
 SolidCompression=yes
@@ -28,8 +33,19 @@ UninstallDisplayName=CherryColaLLM
 [Files]
 Source: "{#SourceExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
+Source: "{#GuiExe}"; DestDir: "{app}"; Flags: ignoreversion
 ; The old command name still works.
 Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "cherrycola.exe"; Flags: ignoreversion
+
+[Icons]
+Name: "{autoprograms}\CherryColaLLM"; Filename: "{app}\cherrycolallm-gui.exe"
+Name: "{autodesktop}\CherryColaLLM"; Filename: "{app}\cherrycolallm-gui.exe"; Tasks: desktopicon
+
+[Tasks]
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"
+
+[Run]
+Filename: "{app}\cherrycolallm-gui.exe"; Description: "Open CherryColaLLM"; Flags: nowait postinstall skipifsilent
 
 [Registry]
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; \

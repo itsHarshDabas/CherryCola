@@ -17,3 +17,13 @@ jobs:
         with: { python-version: '${{ matrix.python }}' }
       - run: pip install pytest
       - run: python -m pytest -q
+
+  gui:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo build --manifest-path gui/Cargo.toml

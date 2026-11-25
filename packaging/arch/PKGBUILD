@@ -3,7 +3,7 @@
 # and pushes this file to aur.archlinux.org when AUR_SSH_PRIVATE_KEY is set.
 # (GraceOS builds its own package from a pinned commit instead.)
 pkgname=cherrycolallm
-pkgver=0.3.0
+pkgver=1.0
 pkgrel=1
 pkgdesc="Run AI models on your own PC: Ollama, llama.cpp or LM Studio, with every load setting"
 arch=(any)

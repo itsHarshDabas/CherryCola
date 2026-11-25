@@ -1,4 +1,4 @@
-# Push a tag like v0.2.0 (matching pyproject.toml) to publish a release:
+# Push a tag like v1.0 (matching pyproject.toml) to publish a release:
 # Linux .tar.gz/.deb/.rpm, an Arch package, a Windows .exe, a wheel, and
 # a Scoop manifest, all attached to a GitHub release.
 # Optional, when set up in the repo settings:
@@ -79,6 +79,8 @@ jobs:
         with: { python-version: '3.12' }
       - run: pip install pytest pyinstaller
       - run: python -m pytest -q
+      - name: Build the chat window (Rust)
+        run: cargo build --release --manifest-path gui/Cargo.toml
       - run: pyinstaller --onefile --name cherrycolallm --paths . packaging/windows/cherrycola_cli.py
       - name: Check the exe runs
         run: |
@@ -91,14 +93,14 @@ jobs:
           if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress }
           $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
           if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
-          & $iscc "/DAppVersion=$v" "/DSourceExe=$PWD\dist\cherrycolallm.exe" "/O$PWD\installer" packaging\windows\cherrycolallm.iss
+          & $iscc "/DAppVersion=$v" "/DSourceExe=$PWD\dist\cherrycolallm.exe" "/DGuiExe=$PWD\gui\target\release\cherrycolallm-gui.exe" "/O$PWD\installer" packaging\windows\cherrycolallm.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Zip it, and fill in the Scoop manifest
         shell: pwsh
         run: |
           $v = "${{ needs.version.outputs.version }}"
           New-Item -ItemType Directory out | Out-Null
-          Copy-Item dist\cherrycolallm.exe, packaging\windows\README.txt out\
+          Copy-Item dist\cherrycolallm.exe, gui\target\release\cherrycolallm-gui.exe, packaging\windows\README.txt out\
           $zip = "cherrycolallm-$v-windows-x64.zip"
           Compress-Archive -Path out\* -DestinationPath $zip
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
