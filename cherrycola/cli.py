@@ -1,4 +1,4 @@
-"""CLI: ``cherrycolallm ask|chat|status|models|pull|use|backend|start|stop``,
+"""CLI: ``cherrycolallm ask|chat|status|models|pull|unload|use|backend|start|stop``,
 model settings (``settings|set|unset|preset|flag|options``) and llama.cpp
 model tools (``get|import-ollama|quantize|imatrix|info|plan``)."""
 
@@ -15,7 +15,7 @@ from typing import Sequence
 
 from . import backends as be
 from . import config as config_mod
-from . import gguf, hardware, llamacpp, osdeps, profiles
+from . import gguf, hardware, llamacpp, osdeps, profiles, routes
 from . import web as web_mod
 
 __all__ = ["build_parser", "main", "run"]
@@ -161,13 +161,13 @@ def ensure_running(backend: str, cfg: config_mod.Config,
 
 def _missing_model_message(model: str, backend: str = "ollama") -> str:
     if backend == "llamacpp":
-        return (f"no GGUF model named {model}. Get one with: cherrycolallm get "
-                f"OWNER/REPO:Q4_K_M, or reuse an Ollama download with: "
-                f"cherrycolallm import-ollama MODEL")
+        return (f"no GGUF model named {model}. Get one with: cherrycolallm "
+                f"pull OWNER/REPO:Q4_K_M (Hugging Face), an https link to a "
+                f".gguf, a .gguf file, or an Ollama model you already have")
     if backend == "lmstudio":
-        return (f"LM Studio has no model named {model} loaded. Download or "
-                f"load it in the LM Studio app, or pick another with: "
-                f"cherrycolallm use MODEL")
+        return (f"LM Studio has no model named {model}. Get it with: "
+                f"cherrycolallm pull {model} (needs LM Studio's lms command), "
+                f"or pick another with: cherrycolallm use MODEL")
     size = config_mod.MODEL_SIZES_GB.get(model)
     if size is not None:
         return (
@@ -222,10 +222,48 @@ def cmd_ask(args, cfg: config_mod.Config) -> int:
     if rc != EXIT_OK:
         return rc
     model = args.model or be.resolve_model(backend, cfg)
-    args.settings = _settings_for(args, model)
     if not be.check_model_installed(backend, model, cfg):
-        _err(_missing_model_message(model, backend))
-        return EXIT_MODEL_MISSING
+        if not getattr(args, "pull", False):
+            _err(_missing_model_message(model, backend))
+            return EXIT_MODEL_MISSING
+        _status_line(f"getting {model} through {backend}")
+        try:
+            model = routes.pull(cfg, model, backend, on_progress=lambda o:
+                                _pull_progress(o, sys.stderr))
+        except be.BackendError as exc:
+            sys.stderr.write("\n")
+            _err(f"could not get {model}: {exc}")
+            return EXIT_MODEL_MISSING
+        sys.stderr.write("\n")
+    args.settings = _settings_for(args, model)
+    if getattr(args, "temporary", False):
+        return _ask_temporarily(args, cfg, backend, model)
+    return cmd_ask_loaded(args, cfg, backend, model)
+
+
+def _ask_temporarily(args, cfg: config_mod.Config, backend: str,
+                     model: str) -> int:
+    """Load the model just for this answer, then free its memory.
+
+    A model that was already loaded (someone is chatting with it) stays
+    loaded: only what this run loaded is unloaded.
+    """
+    keep = routes.was_loaded(backend, cfg, model)
+    if backend == "ollama" and not keep:
+        args.settings = {**args.settings, "keep_alive": "0"}
+    args.temporary = False
+    try:
+        return cmd_ask_loaded(args, cfg, backend, model)
+    finally:
+        if not keep and backend != "ollama":
+            try:
+                routes.unload(backend, cfg, model)
+            except be.BackendError as exc:
+                _err(f"could not unload {model}: {exc}")
+
+
+def cmd_ask_loaded(args, cfg: config_mod.Config, backend: str,
+                   model: str) -> int:
     if args.question == ["-"]:
         question = sys.stdin.read().strip()
     else:
@@ -233,8 +271,7 @@ def cmd_ask(args, cfg: config_mod.Config) -> int:
     if not question:
         _err("ask needs a question")
         return EXIT_USAGE
-    use_web = bool(getattr(args, "web", False))
-    if use_web:
+    if getattr(args, "web", False):
         return _answer_with_sources(question, args, cfg, backend, model)
     messages = [
         {"role": "system", "content": be.SYSTEM_PROMPT},
@@ -445,42 +482,55 @@ def cmd_recommend(args, cfg: config_mod.Config) -> int:
     return EXIT_OK
 
 
+def _pull_progress(obj: dict, out=None) -> None:
+    out = out or sys.stdout
+    total = obj.get("total")
+    done = obj.get("completed")
+    status = obj.get("status", "")
+    if isinstance(total, (int, float)) and total and isinstance(
+            done, (int, float)):
+        pct = min(100.0, 100.0 * done / total)
+        out.write(f"\r{status} {pct:5.1f}%")
+    else:
+        out.write(f"\r{status}".rstrip() + " " * 4)
+    out.flush()
+
+
 def cmd_pull(args, cfg: config_mod.Config) -> int:
+    """Get a model through the selected engine, in whatever form it was given."""
     backend = be.resolve_backend(cfg)
-    model = args.model or be.resolve_model(backend, cfg)
-    if backend == "llamacpp":
-        _err("the llama.cpp engine downloads with: cherrycolallm get "
-             "OWNER/REPO:QUANT (from Hugging Face)")
-        return EXIT_USAGE
-    if backend != "ollama":
-        _err("models are downloaded in the LM Studio app")
-        return EXIT_USAGE
-    rc = ensure_running(backend, cfg)
-    if rc != EXIT_OK:
-        return rc
-    print(f"Pulling {model} (downloads from the internet)...")
-
-    def on_progress(obj: dict) -> None:
-        total = obj.get("total")
-        done = obj.get("completed")
-        status = obj.get("status", "")
-        if isinstance(total, (int, float)) and total and isinstance(
-                done, (int, float)):
-            pct = min(100.0, 100.0 * done / total)
-            sys.stdout.write(f"\r{status} {pct:5.1f}%")
-        else:
-            sys.stdout.write(f"\r{status}".rstrip() + " " * 4)
-        sys.stdout.flush()
-
+    spec = args.model or be.resolve_model(backend, cfg)
+    if backend == "ollama":
+        rc = ensure_running(backend, cfg)
+        if rc != EXIT_OK:
+            return rc
+    print(f"Getting {spec} through {backend} (downloads from the internet "
+          f"unless it's a file)...")
     try:
-        be.pull_model(backend, cfg, model, on_progress=on_progress)
+        name = routes.pull(cfg, spec, backend, on_progress=_pull_progress)
     except be.BackendError as exc:
         sys.stdout.write("\n")
         _err(str(exc) or "pull failed")
         return EXIT_UNREACHABLE
     sys.stdout.write("\n")
     sys.stdout.flush()
-    print(f"Pulled {model}.")
+    if getattr(args, "use", False):
+        config_mod.save_setting("model", name, cfg.path)
+        print(f"Pulled {name}, now the default model.")
+    else:
+        print(f"Pulled {name}.")
+    return EXIT_OK
+
+
+def cmd_unload(args, cfg: config_mod.Config) -> int:
+    backend = be.resolve_backend(cfg)
+    try:
+        freed = routes.unload(backend, cfg, None if args.all else
+                              (args.model or be.resolve_model(backend, cfg)))
+    except be.BackendError as exc:
+        _err(str(exc) or "unload failed")
+        return EXIT_UNREACHABLE
+    print("Unloaded." if freed else "Nothing was loaded.")
     return EXIT_OK
 
 
@@ -816,6 +866,12 @@ def build_parser() -> argparse.ArgumentParser:
                      help="search the web first and cite sources")
     _add_run_options(ask)
 
+    ask.add_argument("--temporary", action="store_true",
+                     help="load the model only for this answer, then unload "
+                     "it (a model that was already loaded stays)")
+    ask.add_argument("--pull", action="store_true",
+                     help="if the model is missing, get it through the "
+                     "selected engine first")
     search_cmd = sub.add_parser("search", help="search the web (no model)")
     search_cmd.add_argument("query", nargs="+", help="search words")
     search_cmd.add_argument("--json", action="store_true",
@@ -913,8 +969,16 @@ def build_parser() -> argparse.ArgumentParser:
     rm = sub.add_parser("remove", help="delete a downloaded model (Ollama only)")
     rm.add_argument("model")
 
-    pull = sub.add_parser("pull", help="download a model (Ollama only)")
+    pull = sub.add_parser(
+        "pull", help="get a model through the selected engine: an Ollama "
+        "tag, a Hugging Face GGUF repo (OWNER/REPO:QUANT), an https link to "
+        "a .gguf, or a .gguf file")
     pull.add_argument("model", nargs="?", default=None)
+    pull.add_argument("--use", action="store_true",
+                      help="make it the default model afterwards")
+
+    unl = sub.add_parser("unload", help="free a model's memory now")
+    _add_target(unl)
 
     use = sub.add_parser("use", help="set the default model")
     use.add_argument("model")
@@ -980,6 +1044,8 @@ def run(argv: Sequence[str] | None = None,
             return cmd_set(args, loaded)
         if args.command == "pull":
             return cmd_pull(args, loaded)
+        if args.command == "unload":
+            return cmd_unload(args, loaded)
         if args.command == "remove":
             backend = be.resolve_backend(loaded)
             rc = ensure_running(backend, loaded)

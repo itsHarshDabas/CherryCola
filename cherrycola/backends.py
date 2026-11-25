@@ -501,9 +501,11 @@ def remove_model(backend, cfg, model) -> None:
 
 
 def pull_model(backend, cfg, model, on_progress=None) -> None:
-    """Ollama only: POST /api/pull, streaming progress objects."""
+    """Ollama's POST /api/pull, streaming progress objects. Other engines
+    get models through routes.pull."""
     if backend != "ollama":
-        raise BackendError("models are downloaded in the LM Studio app")
+        raise BackendError("use cherrycolallm pull, which picks the way "
+                           "for each engine")
     url = _url(cfg.ollama_url, "/api/pull")
     data = json.dumps({"model": model, "stream": True}).encode()
     req = urllib.request.Request(
@@ -515,23 +517,27 @@ def pull_model(backend, cfg, model, on_progress=None) -> None:
     except (urllib.error.URLError, socket.timeout, OSError,
             http.client.HTTPException) as exc:
         raise BackendError(str(exc) or type(exc).__name__) from exc
+    def handle(line: bytes) -> None:
+        line = line.strip()
+        if not line:
+            return
+        try:
+            obj = json.loads(line.decode("utf-8"))
+        except ValueError:
+            return
+        if obj.get("error"):
+            raise BackendError(str(obj["error"]))
+        if on_progress is not None:
+            on_progress(obj)
+
     with resp:
         buf = b""
         for raw in resp:
             buf += bytes(raw)
             while b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line.decode("utf-8"))
-                except ValueError:
-                    continue
-                if obj.get("error"):
-                    raise BackendError(str(obj["error"]))
-                if on_progress is not None:
-                    on_progress(obj)
+                handle(line)
+        handle(buf)  # a last line (or a lone error) without a newline
 
 
 

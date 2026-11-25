@@ -78,12 +78,42 @@ cherrycolallm chat                         # interactive (/exit, /clear, /web, C
 cherrycolallm status [--json]
 cherrycolallm models
 cherrycolallm recommend [--json]           # models that fit this PC, and the Ollama build for its GPU
-cherrycolallm pull [MODEL]                 # Ollama only; downloads from the internet
+cherrycolallm pull [MODEL] [--use]         # through the selected engine; see "Getting models"
+cherrycolallm unload [-m MODEL | --all]    # free the model's memory now
+cherrycolallm ask --temporary "fix: teh wether"  # load only for this answer, then unload
+cherrycolallm ask --pull --temporary -m qwen3:1.7b "hi"  # get the model first if it's missing
 cherrycolallm use qwen3:4b
 cherrycolallm backend lmstudio             # or ollama, llamacpp, auto
 cherrycolallm start                        # Ollama, or load the model in llama.cpp
 cherrycolallm stop                         # stops only the server CherryColaLLM started
 ```
+
+## Getting models
+
+`pull` takes a model in any of these forms and gets it the way the
+selected engine (`cherrycolallm backend ...`) wants:
+
+| You give | Ollama | llama.cpp | LM Studio |
+|---|---|---|---|
+| Ollama tag: `qwen3:4b` | `ollama pull` | links Ollama's copy if it has one | `lms get` |
+| Hugging Face GGUF: `Qwen/Qwen3-4B-GGUF:Q4_K_M`, `hf.co/...`, `https://huggingface.co/...` | pulls `hf.co/...` | downloads the GGUF (resumes) | `lms get` |
+| `https://` link to a `.gguf` | downloads, then `ollama create` | downloads into `models/downloads/` | downloads, then `lms import` |
+| a `.gguf` file on this computer | `ollama create` | adds its folder | `lms import` |
+| a model folder (safetensors) | `ollama create` | no | no |
+
+Links must be `https://`, and a download is kept only if it really is a
+GGUF file. On Ollama, `owner/name` is an Ollama namespace unless the name
+says GGUF; write `hf.co/owner/name` to be sure.
+
+### Loading a model only for a moment
+
+`ask --temporary` loads the model for one answer and unloads it as soon
+as the answer is done, so a quick job (CottonCandy's Enhance search, for
+example) doesn't keep gigabytes of RAM taken. Ollama gets
+`keep_alive: 0`; llama.cpp's server is stopped; LM Studio gets
+`lms unload`. If the model was already loaded before (you are chatting
+with it), it stays loaded. `--pull` gets a missing model through the
+route above first, with progress on stderr.
 
 ## Model settings
 
@@ -180,7 +210,7 @@ kernel's readahead.
 down (that is a status, not an error). Exit codes everywhere: 0 ok,
 1 usage/other error, 2 backend unreachable, 3 model missing
 (`ask`/`chat` when the model isn't downloaded — nothing is downloaded
-without `pull`).
+without `pull` or `ask --pull`).
 
 ## How web search works
 

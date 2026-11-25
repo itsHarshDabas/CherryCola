@@ -10,6 +10,9 @@ import pytest
 
 from cherrycola import config as config_mod
 
+# Every POST the fake Ollama got, in order: (path, json body).
+OLLAMA_CALLS: list = []
+
 
 def _make_handler(kind: str):
     class Handler(BaseHTTPRequestHandler):
@@ -59,6 +62,7 @@ def _make_handler(kind: str):
                 payload = json.loads(body.decode() or "{}")
             except ValueError:
                 payload = {}
+            self.server.calls.append((self.path, payload))
             if kind == "ollama" and self.path == "/api/chat":
                 # 3 NDJSON chunks; the <think> block splits across chunks.
                 chunks = [
@@ -83,6 +87,8 @@ def _make_handler(kind: str):
                     "qwen3.context_length": 40960,
                     "qwen3.block_count": 36}})
             if kind == "ollama" and self.path == "/api/pull":
+                if payload.get("model") == "missing:1b":
+                    return self._send_json({"error": "file does not exist"})
                 chunks = [
                     {"status": "pulling", "completed": 1, "total": 4},
                     {"status": "pulling", "completed": 4, "total": 4},
@@ -96,6 +102,8 @@ def _make_handler(kind: str):
                 self.end_headers()
                 self.wfile.write(data)
                 return
+            if kind == "ollama" and self.path == "/api/generate":
+                return self._send_json({"done": True})
             if kind == "lmstudio" and self.path == "/v1/chat/completions":
                 sse = (
                     'data: {"choices": [{"delta": {"content": "Hi "}}]}\n\n'
@@ -130,6 +138,9 @@ def _make_handler(kind: str):
 @pytest.fixture()
 def ollama_server():
     server = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler("ollama"))
+    server.calls = []
+    OLLAMA_CALLS[:] = []
+    server.calls = OLLAMA_CALLS
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     yield f"http://127.0.0.1:{server.server_port}"
@@ -140,6 +151,7 @@ def ollama_server():
 @pytest.fixture()
 def lmstudio_server():
     server = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler("lmstudio"))
+    server.calls = []
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     yield f"http://127.0.0.1:{server.server_port}"
