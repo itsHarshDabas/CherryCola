@@ -39,6 +39,13 @@ _HF_HOSTS = ("hf.co/", "huggingface.co/")
 _NAME = re.compile(r"[\w.-]+")
 _OLLAMA_TAG = re.compile(r"^[\w.-]+(/[\w.-]+)?(:[\w.-]+)?$")
 _MAX_NAME = 200
+# The default Ollama models, as the same model in GGUF on Hugging Face, so a
+# bare `pull` works on llama.cpp and LM Studio too.
+GGUF_EQUIVALENTS = {
+    "qwen3:1.7b": "Qwen/Qwen3-1.7B-GGUF:Q8_0",
+    "qwen3:4b": "Qwen/Qwen3-4B-GGUF:Q4_K_M",
+    "qwen3:8b": "Qwen/Qwen3-8B-GGUF:Q4_K_M",
+}
 
 
 @dataclass(frozen=True)
@@ -228,7 +235,13 @@ def _pull_llamacpp(cfg, spec: Spec, on_progress) -> str:
             return llamacpp.download(cfg, spec.hf_spec,
                                      _bytes_progress(on_progress))
         if spec.kind == "ollama":
-            return llamacpp.import_ollama(cfg, spec.value)
+            try:
+                return llamacpp.import_ollama(cfg, spec.value)
+            except llamacpp.LlamaError:
+                if spec.value not in GGUF_EQUIVALENTS:
+                    raise
+            return llamacpp.download(cfg, GGUF_EQUIVALENTS[spec.value],
+                                     _bytes_progress(on_progress))
         if spec.kind == "url":
             path = download_url(cfg, spec.value, _bytes_progress(on_progress))
             return path.relative_to(llamacpp.models_dir(cfg)).as_posix()[:-5]
@@ -268,7 +281,9 @@ def _pull_lmstudio(cfg, spec: Spec) -> str:
         return path.stem
     if spec.kind == "dir":
         raise be.BackendError("LM Studio imports single .gguf files")
-    _run([lms, "get", "-y", spec.hf_spec if spec.kind == "hf" else spec.value])
+    what = spec.hf_spec if spec.kind == "hf" else \
+        GGUF_EQUIVALENTS.get(spec.value, spec.value)
+    _run([lms, "get", "-y", what])
     return spec.value
 
 

@@ -222,3 +222,18 @@ def test_chat_json_bad_input(ollama_cfg, capsys, monkeypatch):
     import io
     monkeypatch.setattr("sys.stdin", io.StringIO("not json"))
     assert run(["ask", "--chat-json", "-"], cfg=ollama_cfg) == 1
+
+
+def test_default_ollama_model_on_llamacpp_downloads_its_gguf(monkeypatch,
+                                                             tmp_path):
+    cfg = config_mod.Config(backend="llamacpp", models_dir=str(tmp_path))
+    got = []
+    monkeypatch.setattr("cherrycola.llamacpp.ollama_dirs", lambda: [])
+    monkeypatch.setattr("cherrycola.llamacpp.download",
+                        lambda c, spec, prog=None: got.append(spec) or "x")
+    routes.pull(cfg, "qwen3:4b")
+    assert got == ["Qwen/Qwen3-4B-GGUF:Q4_K_M"]
+    from cherrycola import llamacpp
+    with pytest.raises(be.BackendError):
+        routes.pull(cfg, "llama3.2:1b")
+    _ = llamacpp
