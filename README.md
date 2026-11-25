@@ -34,6 +34,18 @@ sudo install -m755 bin/cherrycolallm /usr/bin/cherrycolallm
 sudo ln -sf cherrycolallm /usr/bin/cherrycola
 ```
 
+### Windows
+
+Download `cherrycolallm-<version>-windows-x64-setup.exe` from the
+[releases](https://github.com/itsHarshDabas/CherryColaLLM/releases) (per-user, no
+admin, adds itself to PATH; `cherrycola` works as the old name), or use the
+`.zip`, or Scoop. Then install an engine: `winget install Ollama.Ollama`,
+llama.cpp (`winget install llama.cpp`), or LM Studio. Engines installed to
+their usual folders are found even when they aren't on PATH. Same commands as
+on Linux (`cherrycolallm recommend`, `pull`, `ask`); settings are in
+`%APPDATA%\CherryCola\grace\`, models, chats and logs in
+`%LOCALAPPDATA%\CherryCola\`. The GTK chat app is Linux-only for now.
+
 Or run from this directory with [uv](https://docs.astral.sh/uv/):
 
 ```sh

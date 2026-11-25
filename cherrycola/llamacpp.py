@@ -199,7 +199,7 @@ def server_caps(binary: str) -> set[str]:
     llama.cpp renames flags now and then (``--no-mmap``/``--mlock`` became
     ``--load-mode``), and distro packages lag behind, so ask the binary.
     """
-    path = shutil.which(binary)
+    path = osdeps.which(binary)
     if path is None:
         raise LlamaError(
             f"{binary} is not installed. Install llama.cpp (it provides "
@@ -297,7 +297,7 @@ def parse_help(text: str) -> list[ServerOption]:
 
 def server_options(binary: str) -> list[ServerOption]:
     """Every option this llama-server offers, minus the reserved ones."""
-    path = shutil.which(binary)
+    path = osdeps.which(binary)
     if path is None:
         raise LlamaError(f"{binary} is not installed")
     key = (path, os.stat(path).st_mtime)
@@ -497,7 +497,7 @@ def ensure_loaded(cfg: config_mod.Config, model: str, settings: dict,
     plan = None
     if settings.get("disk_stream"):
         plan = make_plan(gguf.read_info(path), settings)
-    args = [shutil.which(cfg.llama_server) or cfg.llama_server] + \
+    args = [osdeps.which(cfg.llama_server) or cfg.llama_server] + \
         build_args(path, settings, cfg.llamacpp_url, caps, plan, model)
     if settings.get("llama_args"):
         args += raw_args(settings["llama_args"],
@@ -789,7 +789,7 @@ def quantize(cfg: config_mod.Config, src: str, qtype: str,
         raise LlamaError(f"{qtype} needs an importance matrix: "
                          f"cherrycolallm imatrix {src} TEXT_FILE first, then "
                          f"pass --imatrix")
-    binary = shutil.which(cfg.llama_quantize)
+    binary = osdeps.which(cfg.llama_quantize)
     if binary is None:
         raise LlamaError(f"{cfg.llama_quantize} is not installed "
                          f"(it comes with llama.cpp)")
@@ -826,7 +826,7 @@ def imatrix(cfg: config_mod.Config, model: str, text_file: str,
     path = find_model(cfg, model)
     if path is None:
         raise LlamaError(f"no GGUF model named {model}")
-    binary = shutil.which(cfg.llama_imatrix)
+    binary = osdeps.which(cfg.llama_imatrix)
     if binary is None:
         raise LlamaError(f"{cfg.llama_imatrix} is not installed "
                          f"(it comes with llama.cpp)")

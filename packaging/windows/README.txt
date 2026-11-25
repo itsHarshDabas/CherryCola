@@ -1,11 +1,13 @@
 CherryColaLLM for Windows (command line)
 
-1. Put cherrycolallm.exe somewhere on your PATH (or run it from this folder).
-   Installed with Scoop, the old name cherrycola works too.
+1. Run cherrycolallm-<version>-windows-x64-setup.exe (no admin needed; it adds
+   itself to your PATH, open a new terminal afterwards). Or unzip the .zip
+   and put cherrycolallm.exe on your PATH, or "scoop install cherrycolallm".
+   The old name cherrycola works too.
 2. Install an engine:
-   - Ollama for Windows (https://ollama.com), the easiest; or
-   - llama.cpp: unzip a Windows release so llama-server.exe and
-     llama-quantize.exe are on your PATH; or
+   - Ollama for Windows (winget install Ollama.Ollama), the easiest; or
+   - llama.cpp (winget install llama.cpp, or unzip a Windows release so llama-server.exe and
+     llama-quantize.exe are on your PATH); or
    - LM Studio, with its local server turned on.
 3. Try it:
      cherrycolallm recommend

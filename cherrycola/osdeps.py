@@ -45,6 +45,38 @@ def runtime_dir() -> Path:
     return state_home() / "cherrycola"
 
 
+# ---- finding programs -------------------------------------------------------------
+
+def _windows_extra_dirs(name: str) -> list[Path]:
+    """Where Windows installers put engines without always touching PATH."""
+    env = os.environ.get
+    local = Path(env("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    pf = Path(env("ProgramFiles") or r"C:\Program Files")
+    home = Path.home()
+    dirs = [
+        local / "Programs" / "Ollama",              # Ollama for Windows
+        home / ".lmstudio" / "bin",                 # LM Studio's lms
+        local / "Microsoft" / "WinGet" / "Links",   # winget llama.cpp
+        local / "Programs" / "llama.cpp",
+        pf / "llama.cpp",
+        pf / "NVIDIA Corporation" / "NVSMI",
+        Path(env("SystemRoot") or r"C:\Windows") / "System32",
+    ]
+    return dirs
+
+
+def which(name: str) -> str | None:
+    """shutil.which, plus the usual Windows install folders when not on PATH."""
+    found = shutil.which(name)
+    if found or not WINDOWS or os.path.isabs(name):
+        return found
+    for folder in _windows_extra_dirs(name):
+        found = shutil.which(name, path=str(folder))
+        if found:
+            return found
+    return None
+
+
 # ---- processes ----------------------------------------------------------------
 
 def popen_detached() -> dict:

@@ -1,7 +1,8 @@
 """What this PC can run: graphics cards, memory, and models that fit.
 
-GPUs are read from sysfs (no lspci needed); NVIDIA memory comes from
-nvidia-smi when the driver is installed.
+GPUs are read from sysfs on Linux (no lspci needed) and from Windows'
+video controller list on Windows; NVIDIA memory comes from nvidia-smi when
+the driver is installed.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import config as config_mod
+from . import osdeps
 
 # name, download size (GB), what it's for
 CATALOG = [
@@ -50,11 +52,12 @@ def _read(path: Path) -> str:
 
 
 def _nvidia_vram() -> int:
-    if not shutil.which("nvidia-smi"):
+    smi = osdeps.which("nvidia-smi")
+    if not smi:
         return 0
     try:
         out = subprocess.run(
-            ["nvidia-smi", "--query-gpu=memory.total",
+            [smi, "--query-gpu=memory.total",
              "--format=csv,noheader,nounits"],
             capture_output=True, text=True, timeout=5).stdout
         return int(out.split()[0]) * 1024**2  # MiB
@@ -62,7 +65,57 @@ def _nvidia_vram() -> int:
         return 0
 
 
+def _win_vendor(name: str, pnp_id: str = "") -> str:
+    pnp = pnp_id.upper()
+    low = name.lower()
+    if "VEN_10DE" in pnp or "nvidia" in low:
+        return "nvidia"
+    if "VEN_1002" in pnp or "VEN_1022" in pnp or "amd" in low \
+            or "radeon" in low:
+        return "amd"
+    if "VEN_8086" in pnp or "intel" in low:
+        return "intel"
+    return "other"
+
+
+def _windows_gpus() -> list[Gpu]:
+    """Video controllers from Windows. AdapterRAM caps at 4 GB there, so only
+    NVIDIA (nvidia-smi) gets a real memory size; the rest report what Windows
+    says, which is right for cards under 4 GB and a floor for bigger ones."""
+    ps = osdeps.which("powershell") or osdeps.which("pwsh")
+    if not ps:
+        return []
+    cmd = ("Get-CimInstance Win32_VideoController | ForEach-Object "
+           "{ '{0}|{1}|{2}' -f $_.Name, $_.PNPDeviceID, $_.AdapterRAM }")
+    try:
+        out = subprocess.run([ps, "-NoProfile", "-NonInteractive", "-Command",
+                              cmd], capture_output=True, text=True,
+                             timeout=20).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return parse_windows_gpus(out)
+
+
+def parse_windows_gpus(text: str) -> list[Gpu]:
+    gpus = []
+    for line in text.splitlines():
+        parts = line.strip().split("|")
+        if len(parts) < 3 or not parts[0]:
+            continue
+        if parts[0].lower().startswith(("microsoft basic", "microsoft remote")):
+            continue
+        vendor = _win_vendor(parts[0], parts[1])
+        if vendor == "nvidia":
+            size = _nvidia_vram()
+        else:
+            size = int(parts[2]) if parts[2].strip().isdigit() else 0
+        gpus.append(Gpu(vendor, size))
+    return gpus
+
+
 def detect_gpus(pci: Path = Path("/sys/bus/pci/devices")) -> list[Gpu]:
+    if osdeps.WINDOWS:
+        return _windows_gpus()
     gpus = []
     for dev in sorted(pci.iterdir()) if pci.is_dir() else []:
         if not _read(dev / "class").startswith("0x03"):  # display controller
@@ -78,6 +131,8 @@ def detect_gpus(pci: Path = Path("/sys/bus/pci/devices")) -> list[Gpu]:
 
 
 def package_installed(name: str) -> bool:
+    if osdeps.WINDOWS:  # one Ollama for Windows build covers every card
+        return osdeps.which("ollama") is not None
     if not shutil.which("pacman"):
         return False
     try:
@@ -85,6 +140,12 @@ def package_installed(name: str) -> bool:
                               timeout=10).returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
+
+
+def install_hint(engine: str) -> str:
+    if osdeps.WINDOWS:
+        return "winget install Ollama.Ollama  (or https://ollama.com/download)"
+    return f"sudo pacman -S {engine}"
 
 
 def engine_package(gpus: list[Gpu]) -> tuple[str, str]:
