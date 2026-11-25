@@ -1,4 +1,5 @@
-CherryColaLLM for Windows (command line)
+CherryColaLLM for Windows: the app (cherrycolallm-gui.exe, "CherryColaLLM" in the
+Start menu) and the command line (cherrycolallm.exe)
 
 1. Run cherrycolallm-<version>-windows-x64-setup.exe (no admin needed; it adds
    itself to your PATH, open a new terminal afterwards). Or unzip the .zip

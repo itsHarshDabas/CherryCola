@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 from typing import Sequence
 
+from . import attach
 from . import backends as be
 from . import config as config_mod
 from . import gguf, hardware, llamacpp, osdeps, profiles, routes
@@ -264,6 +265,23 @@ def _ask_temporarily(args, cfg: config_mod.Config, backend: str,
                 _err(f"could not unload {model}: {exc}")
 
 
+def _turn_with_attachments(args, cfg: config_mod.Config, question: str):
+    """(earlier messages from --history, this turn with --attach files in it)."""
+    history: list[dict] = []
+    if getattr(args, "history", None):
+        raw = json.loads(Path(args.history).read_text("utf-8"))
+        history = [{"role": m["role"], "content": str(m["content"])}
+                   for m in raw if m.get("role") in ("user", "assistant")]
+    turn: dict = {"role": "user", "content": question}
+    files = getattr(args, "attach", None) or []
+    if files:
+        att = attach.load(files, cfg.whisper_model)
+        turn["content"] = att.text + question
+        if att.images:
+            turn["images"] = att.images
+    return history, turn
+
+
 def cmd_ask_loaded(args, cfg: config_mod.Config, backend: str,
                    model: str) -> int:
     if args.question == ["-"]:
@@ -273,12 +291,17 @@ def cmd_ask_loaded(args, cfg: config_mod.Config, backend: str,
     if not question:
         _err("ask needs a question")
         return EXIT_USAGE
+    try:
+        history, turn = _turn_with_attachments(args, cfg, question)
+    except (attach.AttachError, ValueError, OSError) as exc:
+        _err(str(exc))
+        return EXIT_USAGE
     if getattr(args, "web", False):
-        return _answer_with_sources(question, args, cfg, backend, model)
-    messages = [
-        {"role": "system", "content": be.SYSTEM_PROMPT},
-        {"role": "user", "content": question},
-    ]
+        return _answer_with_sources(
+            question, args, cfg, backend, model,
+            [{"role": "system", "content": be.SYSTEM_PROMPT}] + history,
+            turn)
+    messages = [{"role": "system", "content": be.SYSTEM_PROMPT}] + history + [turn]
     try:
         _stream_answer(backend, cfg, model, messages, args.show_thinking,
                        args.settings)
@@ -292,7 +315,8 @@ def cmd_ask_loaded(args, cfg: config_mod.Config, backend: str,
 
 def _answer_with_sources(question: str, args, cfg: config_mod.Config,
                          backend: str, model: str,
-                         history: list[dict[str, str]] | None = None) -> int:
+                         history: list[dict[str, str]] | None = None,
+                         turn: dict | None = None) -> int:
     """Search, read the top pages, stream a cited answer, print Sources.
 
     history (chat) keeps only the plain question and answer; the page text
@@ -307,7 +331,7 @@ def _answer_with_sources(question: str, args, cfg: config_mod.Config,
     except be.BackendError as exc:
         _err(str(exc) or "web search failed")
         results = []
-    turn = {"role": "user", "content": question}
+    turn = turn or {"role": "user", "content": question}
     if results:
         pages = web_mod.fetch_many([r.url for r in results[:cfg.web_pages]])
         grounded = web_mod.web_messages(question, results, pages)
@@ -866,6 +890,12 @@ def build_parser() -> argparse.ArgumentParser:
                      help="keep <think> reasoning blocks")
     ask.add_argument("--web", action="store_true",
                      help="search the web first and cite sources")
+    ask.add_argument("--attach", action="append", metavar="FILE",
+                     help="give the model a file: text, document, image, "
+                     "audio or video (repeatable; see attach.py)")
+    ask.add_argument("--history", metavar="FILE",
+                     help="JSON list of earlier {role, content} messages, "
+                     "for apps that keep a conversation")
     _add_run_options(ask)
 
     ask.add_argument("--temporary", action="store_true",

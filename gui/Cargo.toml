@@ -1,0 +1,22 @@
+[package]
+name = "cherrycolallm-gui"
+version = "1.0.0"
+edition = "2021"
+description = "CherryColaLLM: the native chat and model hub window"
+license = "MIT"
+
+[[bin]]
+name = "cherrycolallm-gui"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rfd = "0.15"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
+codegen-units = 1

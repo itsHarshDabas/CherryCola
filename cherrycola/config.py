@@ -42,9 +42,9 @@ MODEL_SIZES_GB = {
 _VALID_KEYS = ("backend", "model", "ollama_url", "lmstudio_url",
                "search", "searxng_url", "duckduckgo_url", "web_pages",
                "llamacpp_url", "models_dir", "hf_url", "llama_server",
-               "llama_quantize", "llama_imatrix", "model_dirs")
+               "llama_quantize", "llama_imatrix", "model_dirs", "whisper_model")
 _PLAIN_KEYS = ("models_dir", "llama_server", "llama_quantize",
-               "llama_imatrix")
+               "llama_imatrix", "whisper_model")
 
 
 @dataclass
@@ -63,6 +63,7 @@ class Config:
     llama_server: str = "llama-server"
     llama_quantize: str = "llama-quantize"
     llama_imatrix: str = "llama-imatrix"
+    whisper_model: str = ""  # whisper.cpp ggml file, for audio attachments
     # More folders of GGUF files, separated by | in the file.
     model_dirs: list[str] = field(default_factory=list)
     path: Path | None = None

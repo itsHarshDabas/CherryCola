@@ -9,5 +9,8 @@
         "cherrycolallm.exe",
         ["cherrycolallm.exe", "cherrycola"]
     ],
+    "shortcuts": [
+        ["cherrycolallm-gui.exe", "CherryColaLLM"]
+    ],
     "notes": "Install an engine too: Ollama, llama.cpp or LM Studio. See README.txt."
 }

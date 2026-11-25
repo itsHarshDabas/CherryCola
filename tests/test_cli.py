@@ -226,3 +226,40 @@ def test_missing_model_message_names_the_right_fix():
     lm = _missing_model_message("lm-model", "lmstudio")
     assert "cherrycolallm pull lm-model" in lm and "lms" in lm
     assert "cherrycolallm pull OWNER/REPO" in _missing_model_message("m", "llamacpp")
+
+
+def test_attach_documents_and_images(tmp_path):
+    import base64
+    import zipfile
+    from cherrycola import attach
+
+    (tmp_path / "notes.md").write_text("# Plan\nbuy cherries\n")
+    (tmp_path / "pic.png").write_bytes(b"\x89PNG fake")
+    with zipfile.ZipFile(tmp_path / "doc.docx", "w") as z:
+        z.writestr("word/document.xml",
+                   '<w:document xmlns:w="http://schemas.openxmlformats.org/'
+                   'wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Hello '
+                   'docx</w:t></w:r></w:p></w:body></w:document>')
+    got = attach.load([str(tmp_path / "notes.md"), str(tmp_path / "pic.png"),
+                       str(tmp_path / "doc.docx")])
+    assert "buy cherries" in got.text and "Hello docx" in got.text
+    assert got.images == [base64.b64encode(b"\x89PNG fake").decode()]
+
+
+def test_attach_errors_are_clear(tmp_path):
+    import pytest
+    from cherrycola import attach
+
+    with pytest.raises(attach.AttachError, match="no such file"):
+        attach.load([str(tmp_path / "missing.txt")])
+    (tmp_path / "x.bin").write_bytes(b"\x00\x01\x02")
+    with pytest.raises(attach.AttachError, match="binary"):
+        attach.load([str(tmp_path / "x.bin")])
+
+
+def test_images_reach_openai_style_engines():
+    from cherrycola import backends as be
+
+    msgs = [{"role": "user", "content": "what is this", "images": ["QUJD"]}]
+    out = be._openai_images(msgs)
+    assert out[0]["content"][1]["image_url"]["url"].endswith("base64,QUJD")
