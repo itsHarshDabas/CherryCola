@@ -82,6 +82,7 @@ cherrycolallm pull [MODEL] [--use]         # through the selected engine; see "G
 cherrycolallm unload [-m MODEL | --all]    # free the model's memory now
 cherrycolallm ask --temporary "fix: teh wether"  # load only for this answer, then unload
 cherrycolallm ask --pull --temporary -m qwen3:1.7b "hi"  # get the model first if it's missing
+echo '{"history": [...], "question": "and in 2025?"}' | cherrycolallm ask --web --chat-json -  # a chat turn
 cherrycolallm use qwen3:4b
 cherrycolallm backend lmstudio             # or ollama, llamacpp, auto
 cherrycolallm start                        # Ollama, or load the model in llama.cpp

@@ -262,9 +262,41 @@ def _ask_temporarily(args, cfg: config_mod.Config, backend: str,
                 _err(f"could not unload {model}: {exc}")
 
 
+_CHAT_TURNS = 20
+_CHAT_CHARS = 8000
+
+
+def parse_chat_json(text: str) -> tuple[list[dict[str, str]], str]:
+    """``{"history": [{"role", "content"}...], "question": str}`` from stdin.
+
+    Only user/assistant turns are kept (a caller can't slip in a system
+    prompt), the last 20 turns, each cut to 8000 characters.
+    """
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise profiles.SettingError(f"--chat-json: bad JSON ({exc})") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("question"), str):
+        raise profiles.SettingError('--chat-json needs {"question": "..."}')
+    history = []
+    for turn in data.get("history") or []:
+        if isinstance(turn, dict) and turn.get("role") in ("user", "assistant") \
+                and isinstance(turn.get("content"), str) and turn["content"]:
+            history.append({"role": turn["role"],
+                            "content": turn["content"][:_CHAT_CHARS]})
+    return history[-_CHAT_TURNS:], data["question"].strip()
+
+
 def cmd_ask_loaded(args, cfg: config_mod.Config, backend: str,
                    model: str) -> int:
-    if args.question == ["-"]:
+    history: list[dict[str, str]] = []
+    if getattr(args, "chat_json", False):
+        if args.question != ["-"]:
+            _err("--chat-json reads the question from stdin: use ask "
+                 "--chat-json -")
+            return EXIT_USAGE
+        history, question = parse_chat_json(sys.stdin.read())
+    elif args.question == ["-"]:
         question = sys.stdin.read().strip()
     else:
         question = " ".join(args.question).strip()
@@ -272,9 +304,12 @@ def cmd_ask_loaded(args, cfg: config_mod.Config, backend: str,
         _err("ask needs a question")
         return EXIT_USAGE
     if getattr(args, "web", False):
-        return _answer_with_sources(question, args, cfg, backend, model)
+        return _answer_with_sources(
+            question, args, cfg, backend, model,
+            [{"role": "system", "content": be.SYSTEM_PROMPT}] + history)
     messages = [
         {"role": "system", "content": be.SYSTEM_PROMPT},
+        *history,
         {"role": "user", "content": question},
     ]
     try:
@@ -866,6 +901,10 @@ def build_parser() -> argparse.ArgumentParser:
                      help="search the web first and cite sources")
     _add_run_options(ask)
 
+    ask.add_argument("--chat-json", action="store_true",
+                     help='stdin is {"history": [{"role", "content"}...], '
+                     '"question": "..."}: answer with the earlier turns '
+                     "(with --web, only the question is searched)")
     ask.add_argument("--temporary", action="store_true",
                      help="load the model only for this answer, then unload "
                      "it (a model that was already loaded stays)")
