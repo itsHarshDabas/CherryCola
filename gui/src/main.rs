@@ -6,6 +6,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod cli;
+mod settings_panel;
 mod store;
 mod theme;
 
@@ -60,6 +61,7 @@ struct App {
     // settings page
     status: Option<Value>,
     backend: String,
+    panel: settings_panel::Panel,
     tx: std::sync::mpsc::Sender<Event>,
     rx: std::sync::mpsc::Receiver<Event>,
 }
@@ -97,6 +99,7 @@ impl App {
             recommend: None,
             status: None,
             backend: "auto".into(),
+            panel: Default::default(),
             tx,
             rx,
         };
@@ -246,6 +249,7 @@ impl App {
                 self.refresh(&ctx);
             }
             Event::Note(t) => self.toast = t,
+            Event::Data(tag, r) => self.panel.handle(tag, r),
         }
     }
 }
@@ -470,6 +474,36 @@ impl App {
         let _ = ctx;
     }
 
+    /// The model settings panel on the right, as in the Linux app.
+    fn model_settings(&mut self, ctx: &egui::Context) {
+        let Some(model) = self.model.clone() else { return };
+        if !self.panel.open {
+            return;
+        }
+        let backend = self.status.as_ref().and_then(|s| s["backend"].as_str()).unwrap_or("").to_string();
+        self.panel.ensure_loaded(&self.tx, ctx, &model, &backend, false);
+        let mut engine = None;
+        egui::SidePanel::right("model-settings")
+            .resizable(true)
+            .default_width(390.0)
+            .width_range(330.0..=560.0)
+            .frame(egui::Frame::new().fill(SIDEBAR).inner_margin(Margin { left: 18, right: 14, top: 14, bottom: 10 }).stroke(Stroke::new(1.0_f32, BORDER)))
+            .show(ctx, |ui| {
+                self.panel.ui(ui, &self.tx, ctx, &model, &self.backend, &backend, &mut engine);
+            });
+        if let Some(k) = engine {
+            self.set_engine(ctx, &k);
+        }
+    }
+
+    fn set_engine(&mut self, ctx: &egui::Context, key: &str) {
+        self.backend = key.to_string();
+        cli::run_note(&self.tx, ctx, &["backend", key]);
+        self.refresh(ctx);
+        // the panel reloads once status says which engine is in use
+        self.panel.loaded = Default::default();
+    }
+
     fn chat_view(&mut self, ctx: &egui::Context) {
         // header
         egui::TopBottomPanel::top("top")
@@ -477,6 +511,17 @@ impl App {
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     self.model_picker(ui, ctx);
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let on = self.panel.open;
+                        let b = egui::Button::new(RichText::new("⚙  Model settings").size(13.5).color(if on { TEXT } else { MUTED }))
+                            .fill(if on { SURFACE2 } else { Color32::TRANSPARENT })
+                            .stroke(Stroke::new(1.0_f32, BORDER))
+                            .corner_radius(CornerRadius::same(10))
+                            .min_size(Vec2::new(0.0, 32.0));
+                        if ui.add_enabled(self.model.is_some(), b).on_hover_text("Context length, GPU, sampling and every llama.cpp option (Ctrl+,)").clicked() {
+                            self.panel.open = !on;
+                        }
+                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     let title = self.chats[self.cur.min(self.chats.len() - 1)].title.clone();
                     if !title.is_empty() {
                         ui.add_space(8.0);
@@ -484,8 +529,11 @@ impl App {
                         ui.add_space(4.0);
                         ui.add(egui::Label::new(RichText::new(title).size(13.5).color(MUTED)).truncate());
                     }
+                        });
+                    });
                 });
             });
+        self.model_settings(ctx);
 
         // composer
         egui::TopBottomPanel::bottom("composer")
@@ -633,7 +681,7 @@ impl App {
                             egui::Frame::new().fill(SURFACE2).corner_radius(CornerRadius::same(10)).inner_margin(Margin { left: 10, right: 4, top: 4, bottom: 4 }).show(ui, |ui| {
                                 ui.horizontal(|ui| {
                                     ui.label(RichText::new(format!("{}  {}", file_icon(&s), file_name(&s))).size(13.0));
-                                    if ui.add(egui::Button::new(RichText::new("✕").size(11.0).color(MUTED)).frame(false)).on_hover_text("Remove").clicked() {
+                                    if ui.add(egui::Button::new(RichText::new("×").size(11.0).color(MUTED)).frame(false)).on_hover_text("Remove").clicked() {
                                         drop = Some(i);
                                     }
                                 });
@@ -886,9 +934,7 @@ impl App {
                                         .corner_radius(CornerRadius::same(8))
                                         .min_size(Vec2::new(104.0, 32.0));
                                     if ui.add(b).clicked() && !on {
-                                        self.backend = key.to_string();
-                                        cli::run_note(&self.tx, ctx, &["backend", key]);
-                                        self.refresh(ctx);
+                                        self.set_engine(ctx, key);
                                     }
                                 }
                             });
@@ -943,16 +989,18 @@ impl App {
                     card().show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         ui.label(RichText::new("Advanced").font(semibold(15.0)));
-                        ui.label(RichText::new("Context length, GPU layers, sampling and every llama.cpp option are set per model from a terminal:").size(13.0).color(MUTED));
-                        ui.add_space(6.0);
-                        egui::Frame::new().fill(CODE_BG).corner_radius(CornerRadius::same(8)).inner_margin(Margin::symmetric(12, 8)).show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            ui.label(RichText::new("cherrycolallm settings --list").monospace());
-                        });
+                        ui.label(RichText::new("Context length, GPU layers, sampling, model folders, requantizing and every llama.cpp option live in Model settings, next to the chat.").size(13.0).color(MUTED));
                         ui.add_space(8.0);
-                        if ui.add(secondary("↻  Check again")).clicked() {
-                            self.refresh(ctx);
-                        }
+                        ui.horizontal(|ui| {
+                            if ui.add_enabled(self.model.is_some(), primary("⚙  Open model settings")).clicked() {
+                                self.view = View::Chat;
+                                self.panel.open = true;
+                            }
+                            if ui.add(secondary("↻  Check again")).clicked() {
+                                self.refresh(ctx);
+                                self.panel.loaded = Default::default();
+                            }
+                        });
                     });
                     ui.add_space(14.0);
                     ui.label(RichText::new(format!("CherryColaLLM {}", env!("CARGO_PKG_VERSION"))).size(12.0).color(FAINT));
@@ -990,6 +1038,10 @@ impl eframe::App for App {
         }
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::N)) {
             self.new_chat();
+        }
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Comma)) && self.model.is_some() {
+            self.panel.open = !(self.panel.open && self.view == View::Chat);
+            self.view = View::Chat;
         }
         self.sidebar(ctx);
         match self.view {
