@@ -1034,7 +1034,9 @@ def _flag_argv(argv: list[str]) -> list[str]:
             out += argv[i:i + 2]
             i += 2
             continue
-        if a in ours or a == "--":
+        if a == "--":
+            return out + argv[i:]
+        if a in ours:
             out.append(a)
             i += 1
             continue

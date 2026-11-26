@@ -16,6 +16,8 @@ pub enum Event {
     PullLine(String),
     PullDone(Option<String>, egui::Context),
     Note(String),
+    /// Model settings panel: (what, JSON or plain text / error)
+    Data(&'static str, Result<Value, String>),
 }
 
 /// Next to this exe if it's there (the installer puts them together), else PATH.
@@ -240,5 +242,53 @@ pub fn pull(tx: &Sender<Event>, ctx: &egui::Context, spec: String) {
         let err = if ok { None } else { Some(lasts.into_iter().rev().find(|l| !l.is_empty()).unwrap_or_else(|| "download failed".into())) };
         let _ = tx.send(Event::PullDone(err, ctx.clone()));
         ctx.request_repaint();
+    });
+}
+
+/// Run quick commands in order and hand each result to the settings panel.
+pub fn load(tx: &Sender<Event>, ctx: &egui::Context, jobs: Vec<(&'static str, Vec<String>)>) {
+    let (tx, ctx) = (tx.clone(), ctx.clone());
+    std::thread::spawn(move || {
+        for (tag, args) in jobs {
+            let r = run_text(&args).map(|t| serde_json::from_str::<Value>(&t).unwrap_or(Value::String(t)));
+            let _ = tx.send(Event::Data(tag, r));
+            ctx.request_repaint();
+        }
+    });
+}
+
+/// Run a command that changes something, report its last line (or its
+/// error) as a panel note, then reload what it changed.
+pub fn change(tx: &Sender<Event>, ctx: &egui::Context, args: Vec<String>, reload: Vec<(&'static str, Vec<String>)>) {
+    change_all(tx, ctx, vec![args], reload)
+}
+
+/// Like `change`, for several commands that must run one after another.
+/// Stops at the first one that fails.
+pub fn change_all(tx: &Sender<Event>, ctx: &egui::Context, cmds: Vec<Vec<String>>, reload: Vec<(&'static str, Vec<String>)>) {
+    let (tx, ctx) = (tx.clone(), ctx.clone());
+    std::thread::spawn(move || {
+        let mut note = Ok(Value::String("Saved.".into()));
+        for args in cmds {
+            match run_text(&args) {
+                Ok(t) => {
+                    let lines: Vec<&str> = t.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+                    if !lines.is_empty() {
+                        note = Ok(Value::String(lines[lines.len().saturating_sub(2)..].join(" ")));
+                    }
+                }
+                Err(e) => {
+                    note = Err(e);
+                    break;
+                }
+            }
+        }
+        let _ = tx.send(Event::Data("note", note));
+        ctx.request_repaint();
+        for (tag, args) in reload {
+            let r = run_text(&args).map(|t| serde_json::from_str::<Value>(&t).unwrap_or(Value::String(t)));
+            let _ = tx.send(Event::Data(tag, r));
+            ctx.request_repaint();
+        }
     });
 }

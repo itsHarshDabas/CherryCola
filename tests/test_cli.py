@@ -263,3 +263,13 @@ def test_images_reach_openai_style_engines():
     msgs = [{"role": "user", "content": "what is this", "images": ["QUJD"]}]
     out = be._openai_images(msgs)
     assert out[0]["content"][1]["image_url"]["url"].endswith("base64,QUJD")
+
+
+def test_flag_argv_keeps_an_explicit_separator():
+    from cherrycola.cli import _flag_argv
+    assert _flag_argv(["flag", "-m", "m", "--mirostat", "2"]) == [
+        "flag", "-m", "m", "--", "--mirostat", "2"]
+    assert _flag_argv(["flag", "-m", "m", "--", "--cache-type-k", "q8_0"]) == [
+        "flag", "-m", "m", "--", "--cache-type-k", "q8_0"]
+    assert _flag_argv(["flag", "--remove", "--perf"]) == [
+        "flag", "--remove", "--", "--perf"]
