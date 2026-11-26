@@ -1,4 +1,7 @@
-# Push a tag like v1.0 (matching pyproject.toml) to publish a release:
+# Push a tag like v1.0 (matching pyproject.toml) to publish a release, or run
+# this workflow by hand (Actions > release > Run workflow): it tags the
+# chosen branch as v<pyproject version> itself, then builds and publishes.
+# Either way it publishes:
 # Linux .tar.gz/.deb/.rpm, an Arch package, a Windows .exe, a wheel, and
 # a Scoop manifest, all attached to a GitHub release.
 # Optional, when set up in the repo settings:
@@ -8,23 +11,37 @@ name: release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
   version:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # to create the tag on a manual run
     outputs:
       version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
       - id: v
         run: |
-          tag=${GITHUB_REF_NAME#v}
           want=$(python3 -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
-          if [ "$tag" != "$want" ]; then
-            echo "tag v$tag doesn't match pyproject.toml version $want" >&2; exit 1
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            tag="v$want"
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+              echo "$tag already exists: bump the version in pyproject.toml first" >&2; exit 1
+            fi
+            git tag "$tag" "$GITHUB_SHA"
+            git push origin "refs/tags/$tag"
+          else
+            tag=$GITHUB_REF_NAME
+            if [ "${tag#v}" != "$want" ]; then
+              echo "tag $tag doesn't match pyproject.toml version $want" >&2; exit 1
+            fi
           fi
-          echo "version=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$want" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
   test:
     runs-on: ubuntu-latest
@@ -124,11 +141,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           (cd assets && sha256sum * > SHA256SUMS)
-          gh release create "$GITHUB_REF_NAME" assets/* --repo "$GITHUB_REPOSITORY" \
+          gh release create "${{ needs.version.outputs.tag }}" assets/* --repo "$GITHUB_REPOSITORY" \
             --title "CherryColaLLM ${{ needs.version.outputs.version }}" --generate-notes
 
   aur:
-    needs: [release]
+    needs: [version, release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -147,7 +164,7 @@ jobs:
           git config user.name "CherryColaLLM release"
           git config user.email "cherrycolallm-release@users.noreply.github.com"
           git add PKGBUILD .SRCINFO
-          git commit -m "Update to ${GITHUB_REF_NAME#v}" && git push origin HEAD:master
+          git commit -m "Update to ${{ needs.version.outputs.version }}" && git push origin HEAD:master
 
   pypi:
     needs: [release]
