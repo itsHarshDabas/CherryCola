@@ -21,6 +21,7 @@ DefaultDirName={localappdata}\Programs\CherryColaLLM
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
 
+SetupIconFile=..\..\gui\assets\icon.ico
 UninstallDisplayIcon={app}\cherrycolallm-gui.exe
 OutputBaseFilename=cherrycolallm-{#AppVersion}-windows-x64-setup
 Compression=lzma2
