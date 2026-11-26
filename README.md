@@ -47,7 +47,11 @@ on Linux (`cherrycolallm recommend`, `pull`, `ask`); settings are in
 `%LOCALAPPDATA%\CherryCola\`. The setup installs **CherryColaLLM**, a native window (Rust) with chats, model
 switching, a Models page (get by name, Hugging Face repo, link or file) and
 attachments: drop in images, documents (text, Word, Excel, PowerPoint, PDF),
-audio or video. It drives the same `cherrycolallm` command, so it works with
+audio or video. **Model settings** (chat header or Ctrl+,) has the same settings as the
+Linux app: context length, GPU layers, sampling and the rest as sliders with safe limits
+and hover help, for one model or all of them, plus model folders, model tools (info,
+GPU/RAM plan, requantize, Hugging Face download, Ollama import) and every llama-server
+option, searchable. It drives the same `cherrycolallm` command, so it works with
 Ollama, llama.cpp and LM Studio. Images need a model that can see (gemma3,
 llava...); video needs `ffmpeg` and audio a transcriber (`whisper`), see
 `cherrycola/attach.py`. The GTK chat app stays for Linux.
