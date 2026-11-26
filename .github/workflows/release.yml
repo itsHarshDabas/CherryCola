@@ -25,15 +25,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           want=$(python3 -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
             tag="v$want"
             if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
-              echo "$tag already exists: bump the version in pyproject.toml first" >&2; exit 1
+              # a tag left by a run that was stopped before it published
+              # anything is moved to this commit; a released one never is
+              if gh release view "$tag" >/dev/null 2>&1; then
+                echo "$tag is already released: bump the version in pyproject.toml first" >&2; exit 1
+              fi
+              echo "$tag exists but was never released: moving it to $GITHUB_SHA"
             fi
-            git tag "$tag" "$GITHUB_SHA"
-            git push origin "refs/tags/$tag"
+            git tag -f "$tag" "$GITHUB_SHA"
+            git push -f origin "refs/tags/$tag"
           else
             tag=$GITHUB_REF_NAME
             if [ "${tag#v}" != "$want" ]; then
