@@ -29,6 +29,7 @@ __all__ = [
     "Setting",
     "SettingError",
     "effective",
+    "airllm_request",
     "llamacpp_request",
     "lmstudio_request",
     "load_profiles",
@@ -61,7 +62,8 @@ class Setting:
     engines: tuple[str, ...] = ("llamacpp", "ollama", "lmstudio")
 
 
-_ALL = ("llamacpp", "ollama", "lmstudio")
+_ALL = ("llamacpp", "ollama", "lmstudio", "airllm")
+_AIR = ("airllm",)
 _LOAD = ("llamacpp", "ollama")
 _LLAMA = ("llamacpp",)
 _KV_TYPES = ("f16", "bf16", "q8_0", "q5_1", "q5_0", "q4_1", "q4_0", "iq4_nl")
@@ -185,6 +187,27 @@ SETTINGS: dict[str, Setting] = {s.key: s for s in (
             "big one answers faster (speculative decoding).",
             engines=_LLAMA),
 )}
+
+# AirLLM: a few of its own load settings, and the sampling it can do
+# through transformers' generate().
+SETTINGS.update({s.key: s for s in (
+    Setting("airllm_compression", "choice", "load", "AirLLM compression",
+            "AirLLM only: store each layer 4-bit or 8-bit so less is read "
+            "from disk per token (about 3x faster at 4-bit, slightly lower "
+            "quality). Needs an NVIDIA card.",
+            choices=("none", "4bit", "8bit"), engines=_AIR),
+    Setting("airllm_prefetch", "bool", "load", "AirLLM prefetching",
+            "AirLLM only: read the next layer from disk while the current "
+            "one computes. Faster on a GPU; leave on.", engines=_AIR),
+)})
+_AIR_SAMPLING = {"context_length", "temperature", "top_k", "top_p", "min_p",
+                 "repeat_penalty", "max_tokens", "seed", "stop",
+                 "system_prompt", "preset"}
+for _key in _AIR_SAMPLING:
+    _s = SETTINGS[_key]
+    SETTINGS[_key] = Setting(**{**_s.__dict__,
+                                "engines": _s.engines + _AIR})
+ENGINES = _ALL
 
 GROUPS = {"load": "Loading", "gpu": "GPU and memory", "rope": "Long context",
           "sampling": "Sampling", "other": "Behaviour",
@@ -439,6 +462,23 @@ def lmstudio_request(settings: dict) -> tuple[dict, list[str]]:
         elif key == "max_tokens":
             if value >= 0:
                 extra["max_tokens"] = value
+        else:
+            skipped.append(key)
+    return extra, skipped
+
+
+def airllm_request(settings: dict) -> tuple[dict, list[str]]:
+    """Extra /v1/chat/completions fields for the AirLLM worker, and the keys
+    it can't apply."""
+    extra, skipped = {}, []
+    for key, value in settings.items():
+        if key in _HANDLED or key in ("context_length", "airllm_compression",
+                                      "airllm_prefetch"):
+            continue  # load settings go on the worker's command line
+        if "airllm" in SETTINGS[key].engines:
+            if key == "max_tokens" and value < 0:
+                continue
+            extra[key] = value
         else:
             skipped.append(key)
     return extra, skipped

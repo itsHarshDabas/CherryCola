@@ -200,9 +200,14 @@ pub fn ask(
 
 /// `cherrycolallm pull SPEC`, reporting its \r-separated progress lines.
 pub fn pull(tx: &Sender<Event>, ctx: &egui::Context, spec: String) {
+    job(tx, ctx, strs(&["pull", "--use", "--", &spec]));
+}
+
+/// A long command whose output lines show as progress (PullLine), then PullDone.
+pub fn job(tx: &Sender<Event>, ctx: &egui::Context, args: Vec<String>) {
     let (tx, ctx) = (tx.clone(), ctx.clone());
     std::thread::spawn(move || {
-        let mut child = match command(&strs(&["pull", "--use", "--", &spec])).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+        let mut child = match command(&args).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
             Ok(c) => c,
             Err(e) => {
                 let _ = tx.send(Event::PullDone(Some(format!("could not run cherrycolallm: {e}")), ctx.clone()));

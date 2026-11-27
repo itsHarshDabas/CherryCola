@@ -3,7 +3,8 @@
 # chosen branch as v<pyproject version> itself, then builds and publishes.
 # Either way it publishes:
 # Linux .tar.gz/.deb/.rpm, an Arch package, a Windows .exe, a wheel, and
-# a Scoop manifest, all attached to a GitHub release.
+# a Scoop manifest, all attached to a GitHub release. Every package except
+# the wheel carries llama.cpp (packaging/llamacpp.env pins the build).
 # Optional, when set up in the repo settings:
 #   - secret AUR_SSH_PRIVATE_KEY: also push packaging/arch/PKGBUILD to the AUR
 #   - variable PUBLISH_PYPI = true: also publish to PyPI (trusted publishing)
@@ -105,11 +106,21 @@ jobs:
       - run: python -m pytest -q
       - name: Build the chat window (Rust)
         run: cargo build --release --manifest-path gui/Cargo.toml
-      - run: pyinstaller --onefile --name cherrycolallm --paths . packaging/windows/cherrycola_cli.py
-      - name: Check the exe runs
+      # airllm_worker.py runs in the AirLLM Python, so it ships as a file.
+      - run: pyinstaller --onefile --name cherrycolallm --paths . --add-data "cherrycola/airllm_worker.py:cherrycola" packaging/windows/cherrycola_cli.py
+      - name: Get the bundled llama.cpp (Vulkan build, runs on the CPU too)
+        shell: bash
+        run: packaging/fetch-llamacpp.sh windows dist/llama.cpp
+      - name: Check the exe runs, and finds the bundled llama.cpp
+        shell: pwsh
         run: |
           dist\cherrycolallm.exe --help
           dist\cherrycolallm.exe settings --list
+          dist\llama.cpp\llama-server.exe --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # No Ollama or LM Studio on the runner: auto must pick llama.cpp.
+          $s = dist\cherrycolallm.exe status --json | ConvertFrom-Json
+          if ($s.backend -ne "llamacpp" -or -not $s.reachable) { Write-Error "bundled llama.cpp not found: $($s | ConvertTo-Json -Compress)"; exit 1 }
       - name: Build the installer
         shell: pwsh
         run: |
@@ -117,7 +128,7 @@ jobs:
           if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress }
           $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
           if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
-          & $iscc "/DAppVersion=$v" "/DSourceExe=$PWD\dist\cherrycolallm.exe" "/DGuiExe=$PWD\gui\target\release\cherrycolallm-gui.exe" "/O$PWD\installer" packaging\windows\cherrycolallm.iss
+          & $iscc "/DAppVersion=$v" "/DSourceExe=$PWD\dist\cherrycolallm.exe" "/DGuiExe=$PWD\gui\target\release\cherrycolallm-gui.exe" "/DLlamaDir=$PWD\dist\llama.cpp" "/O$PWD\installer" packaging\windows\cherrycolallm.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Zip it, and fill in the Scoop manifest
         shell: pwsh
@@ -125,6 +136,7 @@ jobs:
           $v = "${{ needs.version.outputs.version }}"
           New-Item -ItemType Directory out | Out-Null
           Copy-Item dist\cherrycolallm.exe, gui\target\release\cherrycolallm-gui.exe, packaging\windows\README.txt out\
+          Copy-Item -Recurse dist\llama.cpp out\llama.cpp
           $zip = "cherrycolallm-$v-windows-x64.zip"
           Compress-Archive -Path out\* -DestinationPath $zip
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()

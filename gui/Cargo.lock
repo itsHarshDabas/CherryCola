@@ -490,7 +490,7 @@ dependencies = [
 
 [[package]]
 name = "cherrycolallm-gui"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "eframe",
  "rfd",

@@ -34,7 +34,7 @@ from . import backends as be
 from . import config as config_mod
 from . import osdeps
 
-__all__ = ["Spec", "classify", "pull", "unload", "was_loaded"]
+__all__ = ["Spec", "classify", "engine_for", "pull", "unload", "was_loaded"]
 
 _HF_HOSTS = ("hf.co/", "huggingface.co/")
 _NAME = re.compile(r"[\w.-]+")
@@ -220,8 +220,32 @@ def _pull_ollama(cfg, spec: Spec, on_progress) -> str:
         return tag
     if spec.kind == "url":
         path = download_url(cfg, spec.value, _bytes_progress(on_progress))
-        return _ollama_create(_safe_name(path.name), str(path))
-    return _ollama_create(_safe_name(spec.value), spec.value)
+        try:
+            return _ollama_create(_safe_name(path.name), str(path))
+        finally:
+            path.unlink(missing_ok=True)  # Ollama has its own copy now
+    raise be.BackendError(f"{NO_COPY}, and Ollama can only run a model "
+                          f"after copying it into its own store. Run "
+                          f"{Path(spec.value).name} with the llama.cpp "
+                          f"engine instead (it uses the file in place)")
+
+
+# The recommended models (hardware.CATALOG, Ollama names) as GGUF repos on
+# Hugging Face, so llama.cpp can download them without Ollama.
+GGUF_REPOS = {
+    "qwen3:0.6b": "unsloth/Qwen3-0.6B-GGUF",
+    "qwen3:1.7b": "unsloth/Qwen3-1.7B-GGUF",
+    "qwen3:4b": "unsloth/Qwen3-4B-GGUF",
+    "qwen3:8b": "unsloth/Qwen3-8B-GGUF",
+    "qwen3:14b": "unsloth/Qwen3-14B-GGUF",
+    "qwen3:30b": "unsloth/Qwen3-30B-A3B-GGUF",
+    "qwen3:32b": "unsloth/Qwen3-32B-GGUF",
+    "gemma3:4b": "unsloth/gemma-3-4b-it-GGUF",
+    "gemma3:12b": "unsloth/gemma-3-12b-it-GGUF",
+    "qwen2.5-coder:7b": "unsloth/Qwen2.5-Coder-7B-Instruct-GGUF",
+    "qwen2.5-coder:14b": "unsloth/Qwen2.5-Coder-14B-Instruct-GGUF",
+    "gpt-oss:20b": "unsloth/gpt-oss-20b-GGUF",
+}
 
 
 def _pull_llamacpp(cfg, spec: Spec, on_progress) -> str:
@@ -231,7 +255,14 @@ def _pull_llamacpp(cfg, spec: Spec, on_progress) -> str:
             return llamacpp.download(cfg, spec.hf_spec,
                                      _bytes_progress(on_progress))
         if spec.kind == "ollama":
-            return llamacpp.import_ollama(cfg, spec.value)
+            try:
+                return llamacpp.import_ollama(cfg, spec.value)
+            except llamacpp.LlamaError:
+                repo = GGUF_REPOS.get(spec.value)
+                if repo is None:
+                    raise
+            # Not in Ollama: get the same model from Hugging Face.
+            return llamacpp.download(cfg, repo, _bytes_progress(on_progress))
         if spec.kind == "url":
             path = download_url(cfg, spec.value, _bytes_progress(on_progress))
             return path.relative_to(llamacpp.models_dir(cfg)).as_posix()[:-5]
@@ -242,9 +273,36 @@ def _pull_llamacpp(cfg, spec: Spec, on_progress) -> str:
                 return path.relative_to(root).as_posix()[:-5]
             llamacpp.add_folder(cfg, str(path.parent))
             return f"{_folder_prefix(cfg, path.parent)}{path.stem}"
+        if spec.kind == "dir":
+            # A folder of .gguf files: searched where it is, like the app's
+            # Model folders. The first model in it becomes the one to use.
+            folder, count = llamacpp.add_folder(cfg, spec.value)
+            if not count:
+                raise llamacpp.LlamaError(f"{spec.value} has no .gguf files")
+            names = [n for n, p in llamacpp.list_local(cfg).items()
+                     if p.is_relative_to(folder)]
+            return sorted(names)[0]
     except llamacpp.LlamaError as exc:
         raise be.BackendError(str(exc)) from exc
-    raise be.BackendError("llama.cpp runs single .gguf files, not folders")
+    raise be.BackendError("llama.cpp runs .gguf files")
+
+
+def _pull_airllm(cfg, spec: Spec) -> str:
+    """AirLLM runs Hugging Face models: a repo, or a model folder in place."""
+    from . import airllm
+    try:
+        if spec.kind == "dir":
+            return airllm.add_folder(cfg, spec.value)
+        if spec.kind == "hf" and not spec.quant:
+            return airllm.download(cfg, spec.value)
+        if spec.kind == "file":
+            return airllm.add_folder(cfg, spec.value)  # explains GGUF
+    except airllm.AirError as exc:
+        raise be.BackendError(str(exc)) from exc
+    raise be.BackendError("AirLLM runs Hugging Face models: give owner/repo "
+                          "(for example Qwen/Qwen2.5-7B-Instruct) or a model "
+                          "folder; .gguf files and Ollama tags run with the "
+                          "llama.cpp or Ollama engines")
 
 
 def _folder_prefix(cfg, folder: Path) -> str:
@@ -262,15 +320,11 @@ def _pull_lmstudio(cfg, spec: Spec) -> str:
     if lms is None:
         raise be.BackendError("LM Studio downloads with its lms command, "
                               "which isn't installed (LM Studio > Developer)")
-    if spec.kind == "file":
-        _run([lms, "import", "-y", spec.value])
-        return Path(spec.value).stem
-    if spec.kind == "url":
-        path = download_url(cfg, spec.value)
-        _run([lms, "import", "-y", str(path)])
-        return path.stem
-    if spec.kind == "dir":
-        raise be.BackendError("LM Studio imports single .gguf files")
+    if spec.kind in ("file", "dir", "url"):
+        # lms import copies into LM Studio's folder: engine_for sends these
+        # to llama.cpp instead.
+        raise be.BackendError(f"{NO_COPY}: run it with the llama.cpp engine "
+                              f"(LM Studio would import a copy)")
     _run([lms, "get", "-y", spec.hf_spec if spec.kind == "hf" else spec.value])
     return spec.value
 
@@ -285,15 +339,66 @@ def _bytes_progress(on_progress):
     return report
 
 
+NO_COPY = ("CherryColaLLM never copies model files: it runs them where "
+           "they are")
+
+
+def engine_for(cfg: config_mod.Config, spec: Spec, backend: str) -> str:
+    """The engine that should get ``spec``. Raises BackendError when none
+    can use it without copying it.
+
+    Model files and folders on this computer are used where they are, never
+    copied: a .gguf file (or a folder of them) runs with llama.cpp, which
+    ships with CherryColaLLM, and a Hugging Face model folder (config.json
+    + .safetensors) with AirLLM. Ollama and LM Studio only run models in
+    their own stores, so they would have to copy the file in, which takes as
+    long as a download and doubles the disk space; they are skipped. A link
+    to a .gguf is downloaded once, straight into llama.cpp's folder.
+    """
+    from . import airllm
+    llama = be.server_reachable("llamacpp", cfg)
+    if spec.kind in ("file", "url") or (
+            spec.kind == "dir" and _has_gguf(Path(spec.value))):
+        if llama:
+            return "llamacpp"
+        if spec.kind == "url" and backend == "ollama":
+            return backend  # no llama.cpp: Ollama downloads it itself
+        raise be.BackendError(
+            f"{NO_COPY}, and .gguf files run in place with llama.cpp, "
+            f"which isn't installed here. It comes with CherryColaLLM's "
+            f"packages; or install llama.cpp yourself")
+    if spec.kind == "dir":
+        if not airllm.is_model_folder(Path(spec.value)):
+            raise be.BackendError(f"{spec.value} has no .gguf files and "
+                                  f"isn't a Hugging Face model folder")
+        if not airllm.installed(cfg):
+            raise be.BackendError(
+                f"{spec.value} is a Hugging Face model folder, which runs in "
+                f"place with AirLLM. Install it first: cherrycolallm airllm "
+                f"install")
+        return "airllm"
+    return backend
+
+
+def _has_gguf(folder: Path) -> bool:
+    return folder.is_dir() and any(folder.rglob("*.gguf"))
+
+
 def pull(cfg: config_mod.Config, text: str, backend: str | None = None,
          on_progress=None) -> str:
-    """Get a model through the selected engine. Returns the name to use."""
+    """Get a model through the given engine. Returns the name to use.
+
+    Callers that want a local file to run in place pick the engine with
+    ``engine_for`` first; this uses the engine it is given.
+    """
     backend = backend or be.resolve_backend(cfg)
     spec = classify(text, backend)
     if backend == "ollama":
         return _pull_ollama(cfg, spec, on_progress)
     if backend == "llamacpp":
         return _pull_llamacpp(cfg, spec, on_progress)
+    if backend == "airllm":
+        return _pull_airllm(cfg, spec)
     return _pull_lmstudio(cfg, spec)
 
 
@@ -311,9 +416,10 @@ def _post(url: str, payload: dict, timeout: float = 30) -> None:
 
 def loaded_models(backend: str, cfg: config_mod.Config) -> list[str]:
     """Models in memory right now (not just downloaded)."""
-    if backend == "llamacpp":
-        from . import llamacpp
-        model = llamacpp.loaded_model()
+    if backend in ("llamacpp", "airllm"):
+        from . import airllm, llamacpp
+        engine = llamacpp if backend == "llamacpp" else airllm
+        model = engine.loaded_model()
         return [model] if model else []
     if backend == "ollama":
         try:
@@ -335,6 +441,9 @@ def was_loaded(backend: str, cfg: config_mod.Config, model: str) -> bool:
 
 def unload(backend: str, cfg: config_mod.Config, model: str | None) -> bool:
     """Free the model's memory. Returns False when nothing was loaded."""
+    if backend == "airllm":
+        from . import airllm
+        return airllm.stop()
     if backend == "llamacpp":
         from . import llamacpp
         return llamacpp.stop()

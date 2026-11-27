@@ -23,10 +23,11 @@ __all__ = [
     "total_ram_bytes",
 ]
 
-BACKENDS = ("auto", "ollama", "lmstudio", "llamacpp")
+BACKENDS = ("auto", "ollama", "lmstudio", "llamacpp", "airllm")
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_LMSTUDIO_URL = "http://127.0.0.1:1234"
 DEFAULT_LLAMACPP_URL = "http://127.0.0.1:11436"
+DEFAULT_AIRLLM_URL = "http://127.0.0.1:11437"
 DEFAULT_HF_URL = "https://huggingface.co"
 SEARCH_BACKENDS = ("duckduckgo", "searxng", "off")
 DEFAULT_SEARXNG_URL = "http://127.0.0.1:8888"
@@ -42,9 +43,10 @@ MODEL_SIZES_GB = {
 _VALID_KEYS = ("backend", "model", "ollama_url", "lmstudio_url",
                "search", "searxng_url", "duckduckgo_url", "web_pages",
                "llamacpp_url", "models_dir", "hf_url", "llama_server",
-               "llama_quantize", "llama_imatrix", "model_dirs", "whisper_model")
+               "llama_quantize", "llama_imatrix", "model_dirs", "whisper_model",
+               "airllm_url", "airllm_python")
 _PLAIN_KEYS = ("models_dir", "llama_server", "llama_quantize",
-               "llama_imatrix", "whisper_model")
+               "llama_imatrix", "whisper_model", "airllm_python")
 
 
 @dataclass
@@ -63,7 +65,9 @@ class Config:
     llama_server: str = "llama-server"
     llama_quantize: str = "llama-quantize"
     llama_imatrix: str = "llama-imatrix"
-    whisper_model: str = ""  # whisper.cpp ggml file, for audio attachments
+    whisper_model: str = ""
+    airllm_url: str = DEFAULT_AIRLLM_URL
+    airllm_python: str = ""  # empty: CherryColaLLM's own AirLLM environment  # whisper.cpp ggml file, for audio attachments
     # More folders of GGUF files, separated by | in the file.
     model_dirs: list[str] = field(default_factory=list)
     path: Path | None = None
@@ -110,7 +114,7 @@ def load_config(path: Path | None = None) -> Config:
             cfg.searxng_url = value.rstrip("/")
         elif key == "duckduckgo_url":
             cfg.duckduckgo_url = value.rstrip("/")
-        elif key in ("llamacpp_url", "hf_url"):
+        elif key in ("llamacpp_url", "hf_url", "airllm_url"):
             setattr(cfg, key, value.rstrip("/"))
         elif key == "model_dirs":
             cfg.model_dirs = [d.strip() for d in value.split("|") if d.strip()]

@@ -220,9 +220,9 @@ class ChatWindow(Adw.ApplicationWindow):
         self.backend, self.models = backend, models
         self.entry.set_placeholder_text("Ask anything")
         if rc != cli.EXIT_OK:
-            name = {"lmstudio": "LM Studio", "llamacpp": "llama.cpp"}.get(
-                backend, "Ollama")
-            what = "find" if backend == "llamacpp" else "reach"
+            name = {"lmstudio": "LM Studio", "llamacpp": "llama.cpp",
+                    "airllm": "AirLLM"}.get(backend, "Ollama")
+            what = "find" if backend in ("llamacpp", "airllm") else "reach"
             self._banner(f"Can't {what} {name}", "Retry")
             return
         if not self.chat.model:

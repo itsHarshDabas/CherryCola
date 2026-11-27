@@ -182,3 +182,126 @@ def test_temporary_ask_llamacpp_stops_server(monkeypatch, capsys):
                         lambda *a, **k: iter(["ok"]))
     assert run(["ask", "--temporary", "hi"], cfg=cfg) == 0
     assert stopped == [1]
+
+
+# ---- a .gguf picked from this PC runs in place ------------------------------------
+
+def _fake_llama_server(tmp_path, monkeypatch):
+    """A bundled llama.cpp folder holding a llama-server stand-in."""
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    exe = bundle / "llama-server"
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
+    monkeypatch.setenv("CHERRYCOLA_LLAMACPP_DIR", str(bundle))
+    monkeypatch.setenv("PATH", str(tmp_path / "none"))
+    return exe
+
+
+def test_bundled_llama_server_is_found(tmp_path, monkeypatch):
+    from cherrycola import osdeps
+    exe = _fake_llama_server(tmp_path, monkeypatch)
+    assert osdeps.which("llama-server") == str(exe)
+    assert osdeps.which("ollama") is None
+
+
+def test_auto_uses_bundled_llamacpp_when_nothing_else(tmp_path, monkeypatch):
+    _fake_llama_server(tmp_path, monkeypatch)
+    cfg = config_mod.Config(ollama_url="http://127.0.0.1:9",
+                            lmstudio_url="http://127.0.0.1:9")
+    assert be.detect_backend(cfg) == "llamacpp"
+
+
+def test_local_file_on_ollama_runs_in_place_with_llamacpp(
+        ollama_cfg, tmp_path, monkeypatch, capsys):
+    _fake_llama_server(tmp_path, monkeypatch)
+    ollama_cfg.models_dir = str(tmp_path / "models")
+    mine = tmp_path / "Downloads"
+    mine.mkdir()
+    gguf = mine / "My-Model-Q4_K_M.gguf"
+    gguf.write_bytes(b"GGUF" + b"\0" * 64)
+    monkeypatch.setattr("cherrycola.routes._ollama_create",
+                        lambda *a: pytest.fail("copied into Ollama"))
+    OLLAMA_CALLS.clear()
+    assert run(["pull", "--use", "--", str(gguf)], cfg=ollama_cfg) == 0
+    out = capsys.readouterr().out
+    assert "nothing is downloaded or copied" in out
+    assert "Downloading" not in out
+    assert not any(path == "/api/pull" for path, _ in OLLAMA_CALLS)
+    conf = ollama_cfg.path.read_text()
+    assert "backend = llamacpp" in conf
+    from cherrycola import llamacpp
+    name = config_mod.load_config(ollama_cfg.path).model
+    assert llamacpp.list_local(ollama_cfg)[name] == gguf.resolve()
+    assert gguf.exists()  # never moved
+
+
+def test_local_file_is_never_copied_into_ollama(ollama_cfg, tmp_path,
+                                                monkeypatch, capsys):
+    """No llama.cpp here: refuse, rather than let Ollama copy the file."""
+    monkeypatch.setattr("cherrycola.osdeps.bundled", lambda name: None)
+    monkeypatch.setenv("PATH", str(tmp_path / "none"))
+    gguf = tmp_path / "Tiny.gguf"
+    gguf.write_bytes(b"GGUF")
+    monkeypatch.setattr("cherrycola.routes._ollama_create",
+                        lambda *a: pytest.fail("copied into Ollama"))
+    assert run(["pull", str(gguf)], cfg=ollama_cfg) == 2
+    err = capsys.readouterr().err
+    assert "never copies model files" in err and "llama.cpp" in err
+    with pytest.raises(be.BackendError, match="never copies"):
+        routes.pull(ollama_cfg, str(gguf), "ollama")
+
+
+def test_folder_of_ggufs_is_searched_in_place(tmp_path, monkeypatch):
+    _fake_llama_server(tmp_path, monkeypatch)
+    folder = tmp_path / "LM Studio models" / "pub" / "repo"
+    folder.mkdir(parents=True)
+    (folder / "b-Q4.gguf").write_bytes(b"GGUF")
+    (folder / "a-Q8.gguf").write_bytes(b"GGUF")
+    cfg = config_mod.Config(backend="ollama", models_dir=str(tmp_path / "m"),
+                            path=tmp_path / "c.conf")
+    spec = routes.classify(str(tmp_path / "LM Studio models"), "ollama")
+    assert routes.engine_for(cfg, spec, "ollama") == "llamacpp"
+    name = routes.pull(cfg, spec.value, "llamacpp")
+    assert name == "LM Studio models/pub/repo/a-Q8"
+    assert not (tmp_path / "m").exists()  # nothing copied or linked
+
+
+def test_hf_model_folder_runs_in_place_with_airllm(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    folder = tmp_path / "Qwen2.5-7B-Instruct"
+    folder.mkdir()
+    (folder / "config.json").write_text('{"max_position_embeddings": 32768,'
+                                        ' "num_hidden_layers": 28}')
+    (folder / "model.safetensors").write_bytes(b"x")
+    cfg = config_mod.Config(backend="ollama", path=tmp_path / "c.conf")
+    spec = routes.classify(str(folder), "ollama")
+    with pytest.raises(be.BackendError, match="airllm install"):
+        routes.engine_for(cfg, spec, "ollama")
+    monkeypatch.setattr("cherrycola.airllm.installed", lambda c: True)
+    assert routes.engine_for(cfg, spec, "ollama") == "airllm"
+    assert routes.pull(cfg, str(folder), "airllm") == "Qwen2.5-7B-Instruct"
+    from cherrycola import airllm
+    assert airllm.find_model(cfg, "Qwen2.5-7B-Instruct") == folder.resolve()
+    assert airllm.limits(cfg, "Qwen2.5-7B-Instruct") == (32768, 28)
+    assert list((tmp_path / "data").rglob("*.safetensors")) == []
+
+
+def test_airllm_refuses_gguf(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    gguf = tmp_path / "x.gguf"
+    gguf.write_bytes(b"GGUF")
+    cfg = config_mod.Config(backend="airllm")
+    with pytest.raises(be.BackendError, match="not .gguf"):
+        routes.pull(cfg, str(gguf), "airllm")
+
+
+def test_recommended_model_on_llamacpp_without_ollama(tmp_path, monkeypatch):
+    cfg = config_mod.Config(backend="llamacpp", models_dir=str(tmp_path))
+    monkeypatch.setattr("cherrycola.llamacpp.ollama_dirs", lambda: [])
+    seen = []
+    monkeypatch.setattr("cherrycola.llamacpp.download",
+                        lambda c, spec, prog=None: seen.append(spec)
+                        or "Qwen3-4B-GGUF/Qwen3-4B-Q4_K_M")
+    assert routes.pull(cfg, "qwen3:4b") == "Qwen3-4B-GGUF/Qwen3-4B-Q4_K_M"
+    assert seen == ["unsloth/Qwen3-4B-GGUF"]

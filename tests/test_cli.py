@@ -110,7 +110,7 @@ def test_ask_stdin_dash(ollama_cfg, capsys, monkeypatch):
 def test_pull_streams_progress(ollama_cfg, capsys):
     assert run(["pull", "qwen3:4b"], cfg=ollama_cfg) == 0
     out = capsys.readouterr().out
-    assert "Getting qwen3:4b through ollama" in out
+    assert "Downloading qwen3:4b through ollama" in out
     assert "downloads from the internet" in out
     assert "100.0%" in out
     assert "Pulled qwen3:4b." in out

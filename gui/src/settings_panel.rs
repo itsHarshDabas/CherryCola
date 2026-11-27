@@ -15,11 +15,12 @@ use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 
 const GROUPS: [(&str, &str); 5] = [("load", "Loading"), ("gpu", "GPU and memory"), ("rope", "Long context"), ("sampling", "Sampling"), ("other", "Behaviour")];
-const ENGINES: [(&str, &str, &str); 4] = [
-    ("auto", "Automatic", "Ollama when it's installed, else LM Studio's server."),
+const ENGINES: [(&str, &str, &str); 5] = [
+    ("auto", "Automatic", "Ollama when it's installed, else LM Studio's server, else the built-in llama.cpp."),
     ("ollama", "Ollama", "Easy downloads. Most load settings, but not every llama.cpp option."),
-    ("llamacpp", "llama.cpp", "Every setting and llama.cpp option, requantizing and streaming big models from disk. Uses GGUF files."),
+    ("llamacpp", "llama.cpp", "Built in. Every setting and llama.cpp option, requantizing and streaming big models from disk. Runs .gguf files where they are."),
     ("lmstudio", "LM Studio", "Uses the model loaded in the LM Studio app. Only sampling settings apply here."),
+    ("airllm", "AirLLM", "Runs big Hugging Face models (safetensors) one layer at a time, so they fit a small graphics card. Slow, but runs models nothing else here can. Optional: install it from the Models page."),
 ];
 const QUANT_TYPES: [&str; 33] = [
     "Q2_K", "Q2_K_S", "Q3_K_S", "Q3_K_M", "Q3_K_L", "Q4_0", "Q4_1", "Q4_K_S", "Q4_K_M", "Q5_0", "Q5_1", "Q5_K_S", "Q5_K_M", "Q6_K", "Q8_0", "IQ1_S", "IQ1_M", "IQ2_XXS", "IQ2_XS",
