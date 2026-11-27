@@ -56,6 +56,8 @@ struct App {
     pull_log: String,
     pull_frac: Option<f32>,
     pull_spec: String,
+    /// The model being got is a .gguf on this PC: it is added, not downloaded.
+    pull_file: bool,
     pulling: bool,
     recommend: Option<Value>,
     // settings page
@@ -95,6 +97,7 @@ impl App {
             pull_log: String::new(),
             pull_frac: None,
             pull_spec: String::new(),
+            pull_file: false,
             pulling: false,
             recommend: None,
             status: None,
@@ -243,6 +246,7 @@ impl App {
                 self.pulling = false;
                 self.pull_frac = None;
                 self.pull_log = match err {
+                    None if self.pull_file => "Added and ready to chat.".into(),
                     None => "Downloaded and ready to chat.".into(),
                     Some(e) => format!("⚠ {e}"),
                 };
@@ -797,12 +801,22 @@ impl App {
                                 ui.add(bar.fill(ACCENT).desired_height(6.0).corner_radius(CornerRadius::same(4)));
                             }
                             let color = if self.pull_log.starts_with('⚠') { AMBER } else if self.pulling { MUTED } else { GREEN };
+                            // A file is added, not downloaded. Ollama keeps its own copy of it, which takes a while for a big
+                            // model, so say what that progress is.
+                            let (verb, name) = if self.pull_file {
+                                ("Adding", file_name(&self.pull_spec))
+                            } else {
+                                ("Downloading", self.pull_spec.clone())
+                            };
                             let line = match (self.pulling, self.pull_frac) {
-                                (true, Some(f)) => format!("Downloading {}  ·  {:.0}%", self.pull_spec, f * 100.0),
-                                (true, None) => format!("Downloading {}  ·  {}", self.pull_spec, self.pull_log),
+                                (true, Some(f)) => format!("{verb} {name}  ·  {:.0}%", f * 100.0),
+                                (true, None) => format!("{verb} {name}  ·  {}", self.pull_log),
                                 _ => self.pull_log.clone(),
                             };
                             ui.add(egui::Label::new(RichText::new(line).size(12.5).color(color)).truncate());
+                            if self.pulling && self.pull_file && self.engine_is_ollama() {
+                                ui.label(RichText::new("Nothing is downloaded. Ollama copies the file into its own model folder once; after that it loads like any other model.").size(12.0).color(MUTED));
+                            }
                         }
                     });
 
@@ -903,10 +917,16 @@ impl App {
         });
     }
 
+    /// The engine in use right now (status says, once known) is Ollama.
+    fn engine_is_ollama(&self) -> bool {
+        self.status.as_ref().and_then(|s| s["backend"].as_str()) == Some("ollama")
+    }
+
     fn start_pull(&mut self, ctx: &egui::Context, spec: String) {
         self.pulling = true;
         self.pull_frac = None;
         self.pull_log = "starting…".into();
+        self.pull_file = std::path::Path::new(&spec).is_file();
         self.pull_spec = spec.clone();
         cli::pull(&self.tx, ctx, spec);
     }

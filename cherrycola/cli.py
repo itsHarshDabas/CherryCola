@@ -530,8 +530,20 @@ def cmd_pull(args, cfg: config_mod.Config) -> int:
         rc = ensure_running(backend, cfg)
         if rc != EXIT_OK:
             return rc
-    print(f"Getting {spec} through {backend} (downloads from the internet "
-          f"unless it's a file)...")
+    try:
+        is_file = routes.classify(spec, backend).kind in ("file", "dir")
+    except be.BackendError:
+        is_file = False
+    if is_file and backend == "ollama":
+        # Ollama runs only models in its own store, so it copies the file in
+        # once (with progress); nothing comes from the internet.
+        print(f"Adding {spec} to Ollama (it keeps its own copy; nothing is "
+              f"downloaded)...")
+    elif is_file:
+        print(f"Adding {spec} (used where it is; nothing is downloaded)...")
+    else:
+        print(f"Getting {spec} through {backend} (downloads from the "
+              f"internet)...")
     try:
         name = routes.pull(cfg, spec, backend, on_progress=_pull_progress)
     except be.BackendError as exc:
