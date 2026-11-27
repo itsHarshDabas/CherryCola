@@ -1,11 +1,16 @@
 ; Inno Setup script: builds cherrycolallm-<version>-windows-x64-setup.exe.
 ; Per-user install (no admin prompt), adds the folder to the user's PATH.
-; Build:  iscc /DAppVersion=1.0 /DSourceExe=dist\cherrycolallm.exe /DGuiExe=gui\target\release\cherrycolallm-gui.exe packaging\windows\cherrycolallm.iss
+; Build:  iscc /DAppVersion=1.0 /DSourceExe=dist\cherrycolallm.exe /DGuiExe=gui\target\release\cherrycolallm-gui.exe /DLlamaDir=dist\llama.cpp packaging\windows\cherrycolallm.iss
+; LlamaDir is llama.cpp from packaging/fetch-llamacpp.sh: it goes in {app}\llama.cpp,
+; where cherrycolallm.exe looks for it (osdeps.bundled).
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
 #ifndef GuiExe
   #define GuiExe "..\..\gui\target\release\cherrycolallm-gui.exe"
+#endif
+#ifndef LlamaDir
+  #define LlamaDir "..\..\dist\llama.cpp"
 #endif
 #ifndef SourceExe
   #define SourceExe "..\..\dist\cherrycolallm.exe"
@@ -35,8 +40,13 @@ UninstallDisplayName=CherryColaLLM
 Source: "{#SourceExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
 Source: "{#GuiExe}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#LlamaDir}\*"; DestDir: "{app}\llama.cpp"; Flags: ignoreversion recursesubdirs
 ; The old command name still works.
 Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "cherrycola.exe"; Flags: ignoreversion
+
+[InstallDelete]
+; Drop the files of an older bundled llama.cpp before copying the new one.
+Type: filesandordirs; Name: "{app}\llama.cpp"
 
 [Icons]
 Name: "{autoprograms}\CherryColaLLM"; Filename: "{app}\cherrycolallm-gui.exe"

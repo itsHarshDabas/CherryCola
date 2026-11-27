@@ -5,14 +5,16 @@ Start menu) and the command line (cherrycolallm.exe)
    itself to your PATH, open a new terminal afterwards). Or unzip the .zip
    and put cherrycolallm.exe on your PATH, or "scoop install cherrycolallm".
    The old name cherrycola works too.
-2. Install an engine:
-   - Ollama for Windows (winget install Ollama.Ollama), the easiest; or
-   - llama.cpp (winget install llama.cpp, or unzip a Windows release so llama-server.exe and
-     llama-quantize.exe are on your PATH); or
-   - LM Studio, with its local server turned on.
+2. llama.cpp comes with it (in the llama.cpp folder next to cherrycolallm.exe):
+   a Vulkan build that uses NVIDIA, AMD or Intel graphics through the normal
+   driver and falls back to the CPU. Nothing else is needed to run a .gguf
+   file: in the app, Models > File… loads it in place (no download, no copy).
+   Optional engines: Ollama for Windows (winget install Ollama.Ollama), LM
+   Studio with its local server on, or your own llama.cpp (say a CUDA build) on
+   PATH, which wins over the bundled one.
 3. Try it:
+     cherrycolallm pull --use C:\path\to\model.gguf
      cherrycolallm recommend
-     cherrycolallm pull            (Ollama)
      cherrycolallm ask "hello"
 
 Settings live in %APPDATA%\CherryCola\grace\, models, chats and logs in

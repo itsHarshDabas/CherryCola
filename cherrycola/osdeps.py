@@ -65,17 +65,50 @@ def _windows_extra_dirs(name: str) -> list[Path]:
     return dirs
 
 
-def which(name: str) -> str | None:
-    """shutil.which, plus the usual Windows install folders when not on PATH."""
-    found = shutil.which(name)
-    if found or not WINDOWS or os.path.isabs(name):
-        return found
-    for folder in _windows_extra_dirs(name):
-        for ext in ("", ".exe", ".cmd", ".bat"):
+def bundled_dirs() -> list[Path]:
+    """Where the llama.cpp that ships with CherryColaLLM lives.
+
+    The Windows installer puts it in ``<install folder>\\llama.cpp`` next to
+    cherrycolallm.exe; the Linux packages put it in
+    ``/usr/lib/cherrycola/llama.cpp`` next to the Python package. Setting
+    CHERRYCOLA_LLAMACPP_DIR points somewhere else (the tests use it).
+    """
+    dirs = []
+    if os.environ.get("CHERRYCOLA_LLAMACPP_DIR"):
+        dirs.append(Path(os.environ["CHERRYCOLA_LLAMACPP_DIR"]))
+    if getattr(sys, "frozen", False):  # the PyInstaller exe
+        dirs.append(Path(sys.executable).resolve().parent / "llama.cpp")
+    dirs.append(Path(__file__).resolve().parent.parent / "llama.cpp")
+    return dirs
+
+
+def bundled(name: str) -> str | None:
+    """The bundled copy of a llama.cpp program, if this install has one."""
+    if os.path.isabs(name) or os.sep in name or "/" in name:
+        return None
+    for folder in bundled_dirs():
+        for ext in ((".exe", "") if WINDOWS else ("",)):
             candidate = folder / (name + ext)
-            if candidate.is_file():
+            if candidate.is_file() and (WINDOWS or os.access(candidate,
+                                                             os.X_OK)):
                 return str(candidate)
     return None
+
+
+def which(name: str) -> str | None:
+    """shutil.which, the usual Windows install folders when not on PATH,
+    then the llama.cpp bundled with CherryColaLLM. An engine you installed
+    yourself (say a CUDA build of llama.cpp) wins over the bundled one."""
+    found = shutil.which(name)
+    if found or os.path.isabs(name):
+        return found
+    if WINDOWS:
+        for folder in _windows_extra_dirs(name):
+            for ext in ("", ".exe", ".cmd", ".bat"):
+                candidate = folder / (name + ext)
+                if candidate.is_file():
+                    return str(candidate)
+    return bundled(name)
 
 
 # ---- processes ----------------------------------------------------------------

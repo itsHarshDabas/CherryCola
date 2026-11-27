@@ -25,13 +25,19 @@ from . import config as config_mod  # noqa: E402
 from . import backends, gguf, llamacpp, profiles  # noqa: E402
 
 ENGINES = [("auto", "Automatic"), ("ollama", "Ollama"),
-           ("llamacpp", "llama.cpp"), ("lmstudio", "LM Studio")]
+           ("llamacpp", "llama.cpp"), ("lmstudio", "LM Studio"),
+           ("airllm", "AirLLM")]
 ENGINE_HELP = {
-    "auto": "Ollama when it's installed, else LM Studio's server.",
+    "auto": "Ollama when it's installed, else LM Studio's server, else "
+            "llama.cpp.",
     "ollama": "Easy downloads with cherrycolallm pull. Most load settings, "
               "but not every llama.cpp option.",
     "llamacpp": "Every setting and llama.cpp option, requantizing and "
-                "streaming big models from disk. Uses GGUF files.",
+                "streaming big models from disk. Runs .gguf files where "
+                "they are.",
+    "airllm": "Runs big Hugging Face models one layer at a time, so they "
+              "fit a small graphics card (slowly). Optional: install it "
+              "with cherrycolallm airllm install.",
     "lmstudio": "Uses the model loaded in the LM Studio app. Only sampling "
                 "settings apply here; loading is set in LM Studio.",
 }

@@ -1,4 +1,5 @@
-"""HTTP backends: Ollama and LM Studio (OpenAI-compatible). Stdlib only."""
+"""The engines: Ollama, LM Studio, llama.cpp and AirLLM, all spoken to over
+HTTP on localhost (llama.cpp and AirLLM are started on demand). Stdlib only."""
 
 from __future__ import annotations
 
@@ -136,6 +137,10 @@ def http_get_json(url: str, timeout: float = _TIMEOUT) -> object:
 
 
 def server_reachable(backend: str, cfg: config_mod.Config) -> bool:
+    if backend == "airllm":
+        # Started per model too: "reachable" means AirLLM is installed.
+        from . import airllm
+        return airllm.installed(cfg)
     if backend == "llamacpp":
         # llama-server starts per model, on demand: "reachable" means the
         # engine is installed.
@@ -150,13 +155,17 @@ def server_reachable(backend: str, cfg: config_mod.Config) -> bool:
 
 
 def detect_backend(cfg: config_mod.Config) -> str:
-    """auto: Ollama if the CLI exists or its server answers, else LM Studio."""
+    """auto: Ollama if the CLI exists or its server answers, else LM Studio,
+    else llama.cpp (bundled), else Ollama (so the error says to install it)."""
     if osdeps.which("ollama") is not None:
         return "ollama"
     if server_reachable("ollama", cfg):
         return "ollama"
     if server_reachable("lmstudio", cfg):
         return "lmstudio"
+    # The llama.cpp that ships with CherryColaLLM, when nothing else is here.
+    if server_reachable("llamacpp", cfg):
+        return "llamacpp"
     return "ollama"
 
 
@@ -169,7 +178,7 @@ def resolve_backend(cfg: config_mod.Config) -> str:
 def resolve_model(backend: str, cfg: config_mod.Config) -> str:
     if cfg.model:
         return cfg.model
-    if backend in ("lmstudio", "llamacpp"):
+    if backend in ("lmstudio", "llamacpp", "airllm"):
         try:
             models = list_models(backend, cfg)
         except BackendError:
@@ -180,6 +189,9 @@ def resolve_model(backend: str, cfg: config_mod.Config) -> str:
 
 
 def list_models(backend: str, cfg: config_mod.Config) -> list[str]:
+    if backend == "airllm":
+        from . import airllm
+        return list(airllm.list_local(cfg))
     if backend == "llamacpp":
         from . import llamacpp
         return list(llamacpp.list_local(cfg))
@@ -205,6 +217,9 @@ def list_models(backend: str, cfg: config_mod.Config) -> list[str]:
 
 
 def running_model(backend: str, cfg: config_mod.Config) -> str | None:
+    if backend == "airllm":
+        from . import airllm
+        return airllm.loaded_model()
     if backend == "llamacpp":
         from . import llamacpp
         return llamacpp.loaded_model()
@@ -288,6 +303,10 @@ def model_limits(backend: str, cfg: config_mod.Config, model: str,
     engine has it. Unknown numbers stay 0; this never raises."""
     if not model:
         return ModelLimits()
+    if backend == "airllm":
+        from . import airllm
+        ctx, layers = airllm.limits(cfg, model)
+        return ModelLimits(ctx, layers, source="config.json")
     from . import gguf, llamacpp
     path = llamacpp.find_model(cfg, model)
     if path is not None:
@@ -341,6 +360,13 @@ def with_system_prompt(messages: list[dict], settings: dict) -> list[dict]:
 def prepare(backend: str, cfg: config_mod.Config, model: str,
             settings: dict, on_status=None) -> None:
     """Load the model with its settings where the engine needs that first."""
+    if backend == "airllm":
+        from . import airllm
+        try:
+            airllm.ensure_loaded(cfg, model, settings, on_status=on_status)
+        except airllm.AirError as exc:
+            raise BackendError(str(exc)) from exc
+        return
     if backend != "llamacpp":
         return
     from . import llamacpp
@@ -380,6 +406,9 @@ def _open_chat_stream(backend: str, cfg: config_mod.Config,
     elif backend == "llamacpp":
         url = _url(cfg.llamacpp_url, "/v1/chat/completions")
         body.update(profiles.llamacpp_request(settings))
+    elif backend == "airllm":
+        url = _url(cfg.airllm_url, "/v1/chat/completions")
+        body.update(profiles.airllm_request(settings)[0])
     else:
         url = _url(cfg.lmstudio_url, "/v1/chat/completions")
         body.update(profiles.lmstudio_request(settings)[0])
@@ -494,7 +523,15 @@ def iter_chat_chunks(backend, cfg, model, messages, settings=None,
 
 
 def remove_model(backend, cfg, model) -> None:
-    """Ollama: DELETE /api/delete. llama.cpp: delete the GGUF file(s)."""
+    """Ollama: DELETE /api/delete. llama.cpp: delete the GGUF file(s).
+    AirLLM: delete a download, or forget an added folder."""
+    if backend == "airllm":
+        from . import airllm
+        try:
+            airllm.remove(cfg, model)
+        except airllm.AirError as exc:
+            raise BackendError(str(exc)) from exc
+        return
     if backend == "llamacpp":
         from . import llamacpp
         try:

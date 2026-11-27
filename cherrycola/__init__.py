@@ -3,4 +3,4 @@
 Standard library only (Python 3.12+). pytest is a test-only dependency.
 """
 
-__version__ = "1.0"
+__version__ = "1.1"

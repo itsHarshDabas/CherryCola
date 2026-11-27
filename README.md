@@ -13,8 +13,9 @@ builds its `cherrycolallm` package from the commit pinned in its
 
 Local-model CLI for GraceOS. Runs inference through **Ollama** (default),
 **llama.cpp** (`llama-server`, every load option, requantizing, streaming
-big models from disk) or **LM Studio's local server**. The GraceOS desktop
-calls it; users can too.
+big models from disk; it comes with the packages), **LM Studio's local
+server**, or **AirLLM** (optional: big Hugging Face models layer by layer
+on a small graphics card). The GraceOS desktop calls it; users can too.
 
 - Stdlib only (Python 3.12+). `pytest` is a test-only dependency.
 - No AI, provider, or network needed to *run the tool itself* — but `ask`
@@ -39,9 +40,10 @@ sudo ln -sf cherrycolallm /usr/bin/cherrycola
 Download `cherrycolallm-<version>-windows-x64-setup.exe` from the
 [releases](https://github.com/itsHarshDabas/CherryColaLLM/releases) (per-user, no
 admin, adds itself to PATH; `cherrycola` works as the old name), or use the
-`.zip`, or Scoop. Then install an engine: `winget install Ollama.Ollama`,
-llama.cpp (`winget install llama.cpp`), or LM Studio. Engines installed to
-their usual folders are found even when they aren't on PATH. Same commands as
+`.zip`, or Scoop. llama.cpp comes with it (see below), so a `.gguf` file
+runs with nothing else installed; Ollama (`winget install Ollama.Ollama`)
+and LM Studio are optional. Engines installed to their usual folders are
+found even when they aren't on PATH. Same commands as
 on Linux (`cherrycolallm recommend`, `pull`, `ask`); settings are in
 `%APPDATA%\CherryCola\grace\`, models, chats and logs in
 `%LOCALAPPDATA%\CherryCola\`. The setup installs **CherryColaLLM**, a native window (Rust) with chats, model
@@ -110,18 +112,41 @@ cherrycolallm start                        # Ollama, or load the model in llama.
 cherrycolallm stop                         # stops only the server CherryColaLLM started
 ```
 
+### Bundled llama.cpp
+
+Every package except the wheel carries llama.cpp's own release build
+(`packaging/llamacpp.env` pins it; `packaging/fetch-llamacpp.sh` fetches and
+checks it): `llama-server`, `llama-quantize` and `llama-imatrix` with their
+libraries, about 90 MB. It goes in `<install folder>\llama.cpp` on Windows
+and `/usr/lib/cherrycola/llama.cpp` on Linux. It is the **Vulkan** build:
+one build that uses NVIDIA, AMD and Intel graphics through the normal
+graphics driver, and falls back to the CPU (picking the best CPU code for
+the processor) when there is no usable GPU. CUDA builds are NVIDIA-only and
+add about 400 MB, so they aren't bundled; a `llama-server` you install
+yourself (on PATH, or `llama_server` in the config) wins over the bundled
+one. With nothing else installed, `backend = auto` picks llama.cpp.
+
 ## Getting models
 
-`pull` takes a model in any of these forms and gets it the way the
-selected engine (`cherrycolallm backend ...`) wants:
+**Model files and folders on this PC are used where they are, never
+copied.** A `.gguf` file or a folder of them (LM Studio's models folder, for
+example) runs with llama.cpp, whatever engine is selected; `pull --use`
+(the app's File… and Folder… buttons) also switches the engine to
+llama.cpp. A Hugging Face model folder (`config.json` + `.safetensors`)
+runs with AirLLM. Ollama and LM Studio can only run models in their own
+stores, so CherryColaLLM never imports a file into them (that copy took as
+long as a download, which is what the app used to show as "Downloading").
 
-| You give | Ollama | llama.cpp | LM Studio |
-|---|---|---|---|
-| Ollama tag: `qwen3:4b` | `ollama pull` | links Ollama's copy if it has one | `lms get` |
-| Hugging Face GGUF: `Qwen/Qwen3-4B-GGUF:Q4_K_M`, `hf.co/...`, `https://huggingface.co/...` | pulls `hf.co/...` | downloads the GGUF (resumes) | `lms get` |
-| `https://` link to a `.gguf` | downloads, then `ollama create` | downloads into `models/downloads/` | downloads, then `lms import` |
-| a `.gguf` file on this computer | `ollama create` | adds its folder | `lms import` |
-| a model folder (safetensors) | `ollama create` | no | no |
+`pull` takes a model in any of these forms:
+
+| You give | Ollama | llama.cpp | LM Studio | AirLLM |
+|---|---|---|---|---|
+| Ollama tag: `qwen3:4b` | `ollama pull` | links Ollama's copy if it has one, else downloads the same model's GGUF from Hugging Face (the recommended ones) | `lms get` | no |
+| Hugging Face GGUF: `Qwen/Qwen3-4B-GGUF:Q4_K_M`, `hf.co/...`, `https://huggingface.co/...` | pulls `hf.co/...` | downloads the GGUF (resumes) | `lms get` | no |
+| Hugging Face model: `Qwen/Qwen2.5-7B-Instruct` | | | | downloads the safetensors |
+| `https://` link to a `.gguf` | llama.cpp downloads it into `models/downloads/` | same | same | no |
+| a `.gguf` file, or a folder of them | runs with llama.cpp, in place | in place | runs with llama.cpp | runs with llama.cpp |
+| a model folder (safetensors) | runs with AirLLM, in place | | | in place |
 
 Links must be `https://`, and a download is kept only if it really is a
 GGUF file. On Ollama, `owner/name` is an Ollama namespace unless the name
@@ -220,6 +245,42 @@ AirLLM's other ideas map onto llama.cpp like this: its 4/8-bit
 "compression" is `quantize`, its layer sharding is the GGUF file itself
 (read through mmap, no separate shard files), and prefetching is the
 kernel's readahead.
+
+## The AirLLM engine (optional)
+
+[AirLLM](https://github.com/lyogavin/airllm) runs a model one transformer
+layer at a time, reading each layer from disk just before it is needed, so
+a 70B model runs in about 4 GB of graphics memory. It is slow (every token
+reads the whole model from disk) and best with an NVIDIA card, but it runs
+models nothing else here can.
+
+```sh
+cherrycolallm airllm install      # its own Python env: PyTorch (CUDA build with NVIDIA) + airllm
+cherrycolallm backend airllm
+cherrycolallm pull --use Qwen/Qwen2.5-7B-Instruct    # or a model folder on this PC
+cherrycolallm ask "hello"
+cherrycolallm airllm              # status;  airllm uninstall removes the env, keeps models
+```
+
+It needs PyTorch (about 1 GB, 3 GB for the CUDA build), so it isn't
+bundled: `airllm install` makes a Python environment just for it in
+CherryColaLLM's data folder, using a Python 3.9+ on the PC (the Windows
+installer has none of its own; `winget install Python.Python.3.12`), or set
+`airllm_python` to a Python that already has `airllm`. The Windows app's
+Models page has an Install AirLLM button when AirLLM is the engine.
+`cherrycola/airllm_worker.py` serves the model on `airllm_url` (default
+`http://127.0.0.1:11437`) with an OpenAI-style chat endpoint, started on
+demand like llama-server. Settings: context length, sampling (temperature,
+top K/P, min P, repeat penalty, max tokens, seed, stop strings), system
+prompt, plus `airllm_compression` (4bit/8bit layers, NVIDIA only, about 3x
+faster) and `airllm_prefetch`.
+
+The first load splits the model into one file per layer (AirLLM's own
+format) under its data folder: that takes a while and as much disk again as
+the model. The model folder itself stays where it is.
+
+Earlier, only AirLLM's *idea* was here: `disk_stream` on llama.cpp (below)
+streams the layers that don't fit from disk the same way, for GGUF files.
 
 ## `status --json` shape (stable)
 

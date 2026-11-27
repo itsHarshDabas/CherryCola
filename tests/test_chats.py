@@ -12,7 +12,9 @@ def test_save_load_list_delete(tmp_path):
                    "sources": ["https://example.com"]}]
     chats.save(a, tmp_path)
     b = chats.new_chat("qwen3:8b")
-    b.id = b.id[:-4] + "beef"
+    # Same-second saves tie on Windows and fall back to the id: give b the
+    # biggest suffix (a random "fa02" used to sort after "beef").
+    b.id = b.id[:-4] + "ffff"
     chats.save(b, tmp_path)
     (tmp_path / "junk.json").write_text("{not json")
 

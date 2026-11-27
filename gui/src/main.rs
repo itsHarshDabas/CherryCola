@@ -56,9 +56,11 @@ struct App {
     pull_log: String,
     pull_frac: Option<f32>,
     pull_spec: String,
-    /// The model being got is a .gguf on this PC: it is added, not downloaded.
-    pull_file: bool,
     pulling: bool,
+    /// The pull is a model file on this PC: it loads, it doesn't download.
+    pull_local: bool,
+    /// The pull line is showing another long job (installing AirLLM).
+    pull_job: bool,
     recommend: Option<Value>,
     // settings page
     status: Option<Value>,
@@ -97,8 +99,9 @@ impl App {
             pull_log: String::new(),
             pull_frac: None,
             pull_spec: String::new(),
-            pull_file: false,
             pulling: false,
+            pull_local: false,
+            pull_job: false,
             recommend: None,
             status: None,
             backend: "auto".into(),
@@ -246,10 +249,16 @@ impl App {
                 self.pulling = false;
                 self.pull_frac = None;
                 self.pull_log = match err {
-                    None if self.pull_file => "Added and ready to chat.".into(),
+                    None if self.pull_job => format!("{} is installed.", self.pull_spec),
+                    None if self.pull_local => format!("Loaded {}, ready to chat.", file_name(&self.pull_spec)),
                     None => "Downloaded and ready to chat.".into(),
                     Some(e) => format!("⚠ {e}"),
                 };
+                if self.pull_log.starts_with("Loaded") || self.pull_log.starts_with("Downloaded") {
+                    // pull --use made it the default (and may have switched
+                    // the engine): take the model from the next status.
+                    self.model = None;
+                }
                 self.refresh(&ctx);
             }
             Event::Note(t) => self.toast = t,
@@ -776,18 +785,23 @@ impl App {
                     card().show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         ui.label(RichText::new("Get a model").font(semibold(15.0)));
-                        ui.label(RichText::new("A name like qwen3:8b, a Hugging Face repo (owner/repo:Q4_K_M), a link to a .gguf, or a file.").size(13.0).color(MUTED));
+                        ui.label(RichText::new("A name like qwen3:8b, a Hugging Face repo (owner/repo:Q4_K_M), a link to a .gguf, or a file or folder on this PC (used where it is, never copied).").size(13.0).color(MUTED));
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
-                            let w = ui.available_width() - 200.0;
+                            let w = ui.available_width() - 296.0;
                             let edit = ui.add_sized([w, 36.0], egui::TextEdit::singleline(&mut self.pull_text).hint_text(RichText::new("qwen3:8b").color(FAINT)).margin(Margin::symmetric(10, 9)));
                             let go = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                             if (ui.add_enabled(!self.pulling && !self.pull_text.trim().is_empty(), primary("Download").min_size(Vec2::new(96.0, 36.0))).clicked() || go) && !self.pull_text.trim().is_empty() && !self.pulling {
                                 self.start_pull(ctx, self.pull_text.trim().to_string());
                             }
-                            if ui.add_enabled(!self.pulling, secondary("File…").min_size(Vec2::new(80.0, 36.0))).on_hover_text("Use a .gguf file on this PC").clicked() {
+                            if ui.add_enabled(!self.pulling, secondary("File…").min_size(Vec2::new(80.0, 36.0))).on_hover_text("Load a .gguf model file from this PC. It runs in place with the built-in llama.cpp: nothing is downloaded or copied.").clicked() {
                                 if let Some(f) = rfd::FileDialog::new().add_filter("GGUF model", &["gguf"]).pick_file() {
                                     self.start_pull(ctx, f.to_string_lossy().into_owned());
+                                }
+                            }
+                            if ui.add_enabled(!self.pulling, secondary("Folder…").min_size(Vec2::new(88.0, 36.0))).on_hover_text("Use a model folder from this PC where it is: a folder of .gguf files (llama.cpp, LM Studio's models folder works) or a Hugging Face model folder with config.json and .safetensors (AirLLM). Nothing is copied.").clicked() {
+                                if let Some(d) = rfd::FileDialog::new().set_title("Pick a model folder").pick_folder() {
+                                    self.start_pull(ctx, d.to_string_lossy().into_owned());
                                 }
                             }
                         });
@@ -801,24 +815,35 @@ impl App {
                                 ui.add(bar.fill(ACCENT).desired_height(6.0).corner_radius(CornerRadius::same(4)));
                             }
                             let color = if self.pull_log.starts_with('⚠') { AMBER } else if self.pulling { MUTED } else { GREEN };
-                            // A file is added, not downloaded. Ollama keeps its own copy of it, which takes a while for a big
-                            // model, so say what that progress is.
-                            let (verb, name) = if self.pull_file {
-                                ("Adding", file_name(&self.pull_spec))
-                            } else {
-                                ("Downloading", self.pull_spec.clone())
-                            };
+                            let verb = if self.pull_job { "Installing" } else if self.pull_local { "Loading" } else { "Downloading" };
+                            let what = if self.pull_local { file_name(&self.pull_spec) } else { self.pull_spec.clone() };
                             let line = match (self.pulling, self.pull_frac) {
-                                (true, Some(f)) => format!("{verb} {name}  ·  {:.0}%", f * 100.0),
-                                (true, None) => format!("{verb} {name}  ·  {}", self.pull_log),
+                                (true, Some(f)) => format!("{verb} {what}  ·  {:.0}%", f * 100.0),
+                                (true, None) => format!("{verb} {what}  ·  {}", self.pull_log),
                                 _ => self.pull_log.clone(),
                             };
                             ui.add(egui::Label::new(RichText::new(line).size(12.5).color(color)).truncate());
-                            if self.pulling && self.pull_file && self.engine_is_ollama() {
-                                ui.label(RichText::new("Nothing is downloaded. Ollama copies the file into its own model folder once; after that it loads like any other model.").size(12.0).color(MUTED));
-                            }
                         }
                     });
+
+                    let backend = self.status.as_ref().and_then(|v| v["backend"].as_str()).unwrap_or("").to_string();
+                    let reachable = self.status.as_ref().map_or(true, |v| v["reachable"] == true);
+                    if backend == "airllm" && !reachable {
+                        ui.add_space(14.0);
+                        card().show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.label(RichText::new("AirLLM isn't installed yet").font(semibold(15.0)));
+                            ui.label(RichText::new("AirLLM runs big Hugging Face models one layer at a time, so a 70B model fits a 4 GB graphics card (slowly). It needs PyTorch, about 1 GB (3 GB with an NVIDIA card), so it installs separately into its own folder. It also needs Python 3.9 or newer on this PC.").size(13.0).color(MUTED));
+                            ui.add_space(6.0);
+                            if ui.add_enabled(!self.pulling, primary("Install AirLLM")).clicked() {
+                                self.start_job(ctx, "AirLLM", vec!["airllm".into(), "install".into()]);
+                            }
+                        });
+                    }
+                    if backend == "airllm" {
+                        ui.add_space(6.0);
+                        ui.label(RichText::new("AirLLM splits a model into one file per layer the first time it loads it (in its own folder, as much disk again as the model). Your model folder itself is used where it is.").size(12.0).color(MUTED));
+                    }
 
                     ui.add_space(22.0);
                     ui.label(RichText::new(format!("On this PC  ·  {}", self.models.len())).font(semibold(15.0)));
@@ -917,17 +942,24 @@ impl App {
         });
     }
 
-    /// The engine in use right now (status says, once known) is Ollama.
-    fn engine_is_ollama(&self) -> bool {
-        self.status.as_ref().and_then(|s| s["backend"].as_str()) == Some("ollama")
-    }
-
-    fn start_pull(&mut self, ctx: &egui::Context, spec: String) {
+    /// A long CLI job (like installing AirLLM) shown on the same progress line as a download.
+    fn start_job(&mut self, ctx: &egui::Context, what: &str, args: Vec<String>) {
         self.pulling = true;
         self.pull_frac = None;
         self.pull_log = "starting…".into();
-        self.pull_file = std::path::Path::new(&spec).is_file();
+        self.pull_local = false;
+        self.pull_job = true;
+        self.pull_spec = what.into();
+        cli::job(&self.tx, ctx, args);
+    }
+
+    fn start_pull(&mut self, ctx: &egui::Context, spec: String) {
+        self.pull_job = false;
+        self.pulling = true;
+        self.pull_frac = None;
+        self.pull_log = "starting…".into();
         self.pull_spec = spec.clone();
+        self.pull_local = std::path::Path::new(&spec).exists();
         cli::pull(&self.tx, ctx, spec);
     }
 

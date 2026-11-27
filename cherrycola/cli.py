@@ -16,7 +16,7 @@ from typing import Sequence
 from . import attach
 from . import backends as be
 from . import config as config_mod
-from . import gguf, hardware, llamacpp, osdeps, profiles, routes
+from . import airllm, gguf, hardware, llamacpp, osdeps, profiles, routes
 from . import web as web_mod
 
 __all__ = ["build_parser", "main", "run"]
@@ -147,6 +147,12 @@ def ensure_running(backend: str, cfg: config_mod.Config,
     llama.cpp starts per model when a question needs it; here we only
     check it is installed.
     """
+    if backend == "airllm":
+        if not airllm.installed(cfg):
+            _err("AirLLM isn't installed (it needs PyTorch, a few GB). "
+                 "Install it with: cherrycolallm airllm install")
+            return EXIT_UNREACHABLE
+        return EXIT_OK
     if backend == "llamacpp":
         if not be.server_reachable(backend, cfg):
             _err(f"{cfg.llama_server} is not installed (install llama.cpp, "
@@ -163,6 +169,10 @@ def ensure_running(backend: str, cfg: config_mod.Config,
 
 
 def _missing_model_message(model: str, backend: str = "ollama") -> str:
+    if backend == "airllm":
+        return (f"no AirLLM model named {model}. Get one with: cherrycolallm "
+                f"pull OWNER/REPO (a Hugging Face model with safetensors "
+                f"weights), or a model folder on this PC")
     if backend == "llamacpp":
         return (f"no GGUF model named {model}. Get one with: cherrycolallm "
                 f"pull OWNER/REPO:Q4_K_M (Hugging Face), an https link to a "
@@ -522,41 +532,99 @@ def _pull_progress(obj: dict, out=None) -> None:
     out.flush()
 
 
+def _pull_intro(spec: routes.Spec, engine: str) -> str:
+    """What pull is about to do, in words (the app shows this line)."""
+    if spec.kind in ("file", "dir"):
+        name = Path(spec.value).name
+        how = "AirLLM" if engine == "airllm" else "llama.cpp"
+        return (f"Loading {name} from this PC with {how}, where it is: "
+                f"nothing is downloaded or copied.")
+    if spec.kind == "url":
+        return f"Downloading {spec.value} into the {engine} models folder..."
+    return (f"Downloading {spec.value} through {engine} (downloads from "
+            f"the internet)...")
+
+
 def cmd_pull(args, cfg: config_mod.Config) -> int:
     """Get a model through the selected engine, in whatever form it was given."""
     backend = be.resolve_backend(cfg)
-    spec = args.model or be.resolve_model(backend, cfg)
-    if backend == "ollama":
-        rc = ensure_running(backend, cfg)
+    text = args.model or be.resolve_model(backend, cfg)
+    try:
+        spec = routes.classify(text, backend)
+    except be.BackendError as exc:
+        _err(str(exc))
+        return EXIT_USAGE
+    try:
+        engine = routes.engine_for(cfg, spec, backend)
+    except be.BackendError as exc:
+        _err(str(exc))
+        return EXIT_UNREACHABLE
+    if engine == "ollama":
+        rc = ensure_running(engine, cfg)
         if rc != EXIT_OK:
             return rc
+    print(_pull_intro(spec, engine), flush=True)
     try:
-        is_file = routes.classify(spec, backend).kind in ("file", "dir")
-    except be.BackendError:
-        is_file = False
-    if is_file and backend == "ollama":
-        # Ollama runs only models in its own store, so it copies the file in
-        # once (with progress); nothing comes from the internet.
-        print(f"Adding {spec} to Ollama (it keeps its own copy; nothing is "
-              f"downloaded)...")
-    elif is_file:
-        print(f"Adding {spec} (used where it is; nothing is downloaded)...")
-    else:
-        print(f"Getting {spec} through {backend} (downloads from the "
-              f"internet)...")
-    try:
-        name = routes.pull(cfg, spec, backend, on_progress=_pull_progress)
+        name = routes.pull(cfg, spec.value if spec.kind in ("file", "dir")
+                           else text, engine, on_progress=_pull_progress)
     except be.BackendError as exc:
         sys.stdout.write("\n")
         _err(str(exc) or "pull failed")
         return EXIT_UNREACHABLE
     sys.stdout.write("\n")
     sys.stdout.flush()
+    local = spec.kind in ("file", "dir")
+    what = f"Ready: {name}" if local else f"Pulled {name}"
     if getattr(args, "use", False):
         config_mod.save_setting("model", name, cfg.path)
-        print(f"Pulled {name}, now the default model.")
+        if engine != backend:
+            config_mod.save_setting("backend", engine, cfg.path)
+            print(f"{what}, now the default model (engine: {engine}).")
+        else:
+            print(f"{what}, now the default model.")
+    elif engine != backend:
+        print(f"{what}. It runs on the {engine} engine: choose it in "
+              f"settings, or run: cherrycolallm pull --use {text}")
     else:
-        print(f"Pulled {name}.")
+        print(f"{what}.")
+    return EXIT_OK
+
+
+def cmd_airllm(args, cfg: config_mod.Config) -> int:
+    """Install, remove or report the optional AirLLM engine."""
+    if args.action == "install":
+        gpus = hardware.detect_gpus()
+        nvidia = any(g.vendor == "nvidia" for g in gpus)
+        print("Installing AirLLM into its own Python environment in "
+              f"{airllm.home()}. This downloads PyTorch "
+              f"({'the CUDA build, about 3 GB' if nvidia else 'the CPU build, about 1 GB'})"
+              " and AirLLM; models come later with pull.", flush=True)
+        try:
+            py = airllm.install(cfg, gpus, on_status=lambda t: print(
+                f"> {t}", flush=True))
+        except airllm.AirError as exc:
+            _err(str(exc))
+            return EXIT_UNREACHABLE
+        print(f"AirLLM is installed ({py}). Choose it with: cherrycolallm "
+              f"backend airllm")
+        if not nvidia:
+            print("No NVIDIA graphics found: AirLLM will run on the CPU, "
+                  "which is very slow for big models.")
+        return EXIT_OK
+    if args.action == "uninstall":
+        removed = airllm.uninstall(cfg)
+        print("AirLLM removed (downloaded models are kept)." if removed
+              else "AirLLM isn't installed here.")
+        return EXIT_OK
+    ok = airllm.installed(cfg)
+    if args.json:
+        print(json.dumps({"installed": ok, "python": airllm.python(cfg),
+                          "models": list(airllm.list_local(cfg)),
+                          "running": airllm.loaded_model()}))
+        return EXIT_OK
+    print(f"installed: {'yes' if ok else 'no (cherrycolallm airllm install)'}")
+    print(f"python:    {airllm.python(cfg)}")
+    print(f"models:    {', '.join(airllm.list_local(cfg)) or '-'}")
     return EXIT_OK
 
 
@@ -601,7 +669,9 @@ def cmd_settings(args, cfg: config_mod.Config) -> int:
             print(f"{title}:")
             for r in rows:
                 if r["group"] == group:
-                    only = "" if len(r["engines"]) == 3 else \
+                    only = "" if set(r["engines"]) >= {"llamacpp", "ollama",
+                                                     "lmstudio"} and \
+                        len(r["engines"]) >= 3 else \
                         f" [{', '.join(r['engines'])}]"
                     print(f"  {r['key']:<18} {r['help']}{only}")
         print("Presets: " + ", ".join(profiles.PRESETS))
@@ -617,6 +687,9 @@ def cmd_settings(args, cfg: config_mod.Config) -> int:
                     if k in own]
     elif backend == "lmstudio":
         _, skipped = profiles.lmstudio_request(eff)
+    elif backend == "airllm":
+        skipped = [k for k in eff if "airllm" not in
+                   profiles.SETTINGS[k].engines]
     else:
         skipped = [k for k in eff if "llamacpp" not in
                    profiles.SETTINGS[k].engines]
@@ -1030,6 +1103,12 @@ def build_parser() -> argparse.ArgumentParser:
     bck = sub.add_parser("backend", help="set the backend")
     bck.add_argument("name", choices=list(config_mod.BACKENDS))
 
+    air = sub.add_parser("airllm", help="the optional AirLLM engine (runs "
+                         "big models layer by layer on a small GPU)")
+    air.add_argument("action", choices=("status", "install", "uninstall"),
+                     nargs="?", default="status")
+    air.add_argument("--json", action="store_true")
+
     sub.add_parser("start", help="start the ollama server, or load the "
                    "model in llama.cpp")
     sub.add_parser("stop", help="stop the server cherrycola started")
@@ -1090,6 +1169,8 @@ def run(argv: Sequence[str] | None = None,
             return cmd_set(args, loaded)
         if args.command == "pull":
             return cmd_pull(args, loaded)
+        if args.command == "airllm":
+            return cmd_airllm(args, loaded)
         if args.command == "unload":
             return cmd_unload(args, loaded)
         if args.command == "remove":
@@ -1114,6 +1195,12 @@ def run(argv: Sequence[str] | None = None,
             be.prepare("llamacpp", loaded, model, profiles.effective(model),
                        _status_line)
             print(f"{model} is loaded.")
+            return EXIT_OK
+        if args.command == "stop" and \
+                be.resolve_backend(loaded) == "airllm":
+            if not airllm.stop():
+                _err("no AirLLM server started by cherrycola is running")
+                return EXIT_UNREACHABLE
             return EXIT_OK
         if args.command == "stop" and \
                 be.resolve_backend(loaded) == "llamacpp":
