@@ -80,7 +80,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build with makepkg
         run: |
-          pacman -Syu --noconfirm --needed base-devel pacman-contrib git python
+          pacman -Syu --noconfirm --needed base-devel pacman-contrib git python vulkan-icd-loader
           useradd -m builder
           mkdir -p /tmp/pkg && cp packaging/arch/PKGBUILD /tmp/pkg/
           sed -i "s/^pkgver=.*/pkgver=${{ needs.version.outputs.version }}/" /tmp/pkg/PKGBUILD
